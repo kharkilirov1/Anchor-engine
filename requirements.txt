@@ -1,0 +1,8 @@
+torch>=2.0
+numpy>=1.24
+einops>=0.7
+pytest>=8.0
+tokenizers>=0.15
+huggingface_hub>=0.20
+# optional fallback path for some dataset loaders
+datasets>=2.18
