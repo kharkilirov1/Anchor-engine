@@ -20,7 +20,7 @@ env/
 *.npy
 checkpoints/
 archive/
-data/
+/data/
 results/*.json
 results/*.csv
 results/*.png

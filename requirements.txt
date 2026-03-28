@@ -6,3 +6,4 @@ tokenizers>=0.15
 huggingface_hub>=0.20
 # optional fallback path for some dataset loaders
 datasets>=2.18
+transformers>=4.40

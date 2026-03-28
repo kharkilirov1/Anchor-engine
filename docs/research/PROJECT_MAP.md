@@ -26,9 +26,11 @@ Read in this order:
    - compact canonical architecture memo
 4. `docs/research/SUBSYSTEM_INTERFACES.md`
    - last pre-code interface layer
-5. `docs/context.md`
+5. `docs/research/QWEN_INTEGRATION_PLAN.md`
+   - approved integration plan for testing the anchor engine on top of a stronger pretrained model
+6. `docs/context.md`
    - bridge from historical ABPT framing to the anchor-centric pivot
-6. `program.md`
+7. `program.md`
    - active research program
 
 ## 3. Active documents
@@ -38,6 +40,7 @@ Read in this order:
 - `docs/research/MATH_CASES.md`
 - `docs/research/ARCHITECTURE_V1.md`
 - `docs/research/SUBSYSTEM_INTERFACES.md`
+- `docs/research/QWEN_INTEGRATION_PLAN.md`
 - `docs/context.md`
 - `program.md`
 
@@ -69,8 +72,8 @@ It should not yet be mistaken for a full implementation of the anchor-centric th
 ## 5. Immediate next step
 
 The immediate technical direction is now narrower:
-1. improve pretrained-backbone initialization for the anchor layer
-2. test conflict-aware training rather than only clean next-token training
+1. test the anchor engine as an overlay on top of a stronger pretrained model
+2. improve pretrained-backbone initialization for the current anchor layer
 3. clarify which parts of proposal/revision actually survive empirical scrutiny
 
 ## 6. One-sentence summary

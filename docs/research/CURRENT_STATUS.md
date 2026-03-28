@@ -55,3 +55,9 @@ If development continues, the cleanest next move is likely:
 3. train anchor-specific modules on top of an already learned world model
 
 That path is more consistent with the project’s current evidence than training the full anchor stack from scratch.
+
+In parallel, the current approved external-test direction is:
+
+1. attach the anchor engine as an overlay to `Qwen2.5-1.5B`;
+2. run the existing semantic probes on Qwen hidden states;
+3. compare whether anchor diagnostics become more meaningful on a stronger pretrained backbone.
