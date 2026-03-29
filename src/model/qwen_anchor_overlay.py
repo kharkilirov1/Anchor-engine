@@ -14,9 +14,11 @@ from src.model.anchor_viability import ViabilityTracker
 from src.model.config import ModelConfig, TOY_CONFIG
 from src.model.future_influence import FutureInfluenceScorer
 from src.model.future_span_hints import (
+    build_auxiliary_future_proposals,
     build_future_hint_candidates,
     compute_span_anchor_overlap,
     extract_high_influence_spans,
+    summarize_auxiliary_proposals,
 )
 
 
@@ -222,6 +224,7 @@ class QwenAnchorOverlay(nn.Module):
             future_window=future_window,
         )
         hint_batches: list[dict[str, Any]] = []
+        auxiliary_proposal_batches: list[list[dict[str, Any]]] = []
         scores = out["future_influence"]["scores"]
         masks = batch.get("attention_mask")
         for batch_idx in range(batch["input_ids"].size(0)):
@@ -247,14 +250,25 @@ class QwenAnchorOverlay(nn.Module):
                 min_score=span_threshold,
                 top_spans=top_spans,
             )
+            future_hint_candidates = build_future_hint_candidates(future_spans, active_anchor_spans)
             overlap = compute_span_anchor_overlap(future_spans, active_anchor_spans)
+            auxiliary_proposals = build_auxiliary_future_proposals(
+                hidden=out["hidden"][batch_idx, :valid_len],
+                input_ids=trimmed_ids,
+                future_hint_candidates=future_hint_candidates,
+                tokenizer=self.tokenizer,
+            )
+            auxiliary_proposal_batches.append(auxiliary_proposals)
             hint_batches.append(
                 {
                     "active_anchor_spans": active_anchor_spans,
                     "future_spans": future_spans,
-                    "future_hint_candidates": build_future_hint_candidates(future_spans, active_anchor_spans),
+                    "future_hint_candidates": future_hint_candidates,
+                    "auxiliary_proposals": auxiliary_proposals,
                     **overlap,
                 }
             )
         out["future_hint_batches"] = hint_batches
+        out["auxiliary_proposal_batches"] = auxiliary_proposal_batches
+        out["auxiliary_proposal_diagnostics"] = summarize_auxiliary_proposals(auxiliary_proposal_batches)
         return out, batch

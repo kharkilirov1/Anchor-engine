@@ -45,6 +45,7 @@ def collect_case_result(
     )
     diag = out["anchor_diagnostics"]
     influence = out["future_influence"]
+    aux_diag = out["auxiliary_proposal_diagnostics"]
     scores = influence["scores"][0]
     input_ids = batch["input_ids"][0]
     valid_len = int(batch["attention_mask"][0].sum().item()) if "attention_mask" in batch else int(input_ids.numel())
@@ -82,6 +83,19 @@ def collect_case_result(
     )
     future_hint_candidates = build_future_hint_candidates(future_spans, active_anchor_spans)
     overlap = compute_span_anchor_overlap(future_spans, active_anchor_spans)
+    auxiliary_proposals = [
+        {
+            "proposal_type": item["proposal_type"],
+            "proposal_score": float(item["proposal_score"]),
+            "proposal_span": (
+                int(item["proposal_span"][0]),
+                int(item["proposal_span"][1]),
+            ),
+            "proposal_root_token": item["proposal_root_token"],
+            "proposal_text": item["proposal_text"],
+        }
+        for item in out["auxiliary_proposal_batches"][0]
+    ]
     return {
         "name": case_name,
         "family": case_family,
@@ -102,6 +116,15 @@ def collect_case_result(
         "active_anchor_spans": active_anchor_spans,
         "future_spans": future_spans,
         "future_hint_candidates": future_hint_candidates,
+        "auxiliary_proposals": auxiliary_proposals,
+        "auxiliary_proposal_count": int(len(auxiliary_proposals)),
+        "auxiliary_mean_proposal_score": (
+            sum(float(item["proposal_score"]) for item in auxiliary_proposals)
+            / max(len(auxiliary_proposals), 1)
+            if auxiliary_proposals
+            else 0.0
+        ),
+        "auxiliary_batch_mean_score": float(aux_diag["mean_proposal_score"]),
         **overlap,
         "top_future_tokens": top_tokens,
     }
@@ -127,6 +150,12 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         summary[f"{mode}_mean_anchor_span_overlap"] = (
             sum(item.get("anchor_span_overlap_ratio", 0.0) for item in subset) / len(subset)
         )
+        summary[f"{mode}_mean_auxiliary_proposal_count"] = (
+            sum(item.get("auxiliary_proposal_count", 0) for item in subset) / len(subset)
+        )
+        summary[f"{mode}_mean_auxiliary_proposal_score"] = (
+            sum(item.get("auxiliary_mean_proposal_score", 0.0) for item in subset) / len(subset)
+        )
         summary[f"{mode}_mean_future_loss"] = sum(item["future_loss"] for item in subset) / len(subset)
     if "stable_mean_future_influence" in summary and "conflict_mean_future_influence" in summary:
         summary["future_influence_gap_conflict_minus_stable"] = (
@@ -139,6 +168,14 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     if "stable_mean_future_span_overlap" in summary and "conflict_mean_future_span_overlap" in summary:
         summary["future_span_overlap_gap_conflict_minus_stable"] = (
             summary["conflict_mean_future_span_overlap"] - summary["stable_mean_future_span_overlap"]
+        )
+    if "stable_mean_auxiliary_proposal_count" in summary and "conflict_mean_auxiliary_proposal_count" in summary:
+        summary["auxiliary_proposal_count_gap_conflict_minus_stable"] = (
+            summary["conflict_mean_auxiliary_proposal_count"] - summary["stable_mean_auxiliary_proposal_count"]
+        )
+    if "stable_mean_auxiliary_proposal_score" in summary and "conflict_mean_auxiliary_proposal_score" in summary:
+        summary["auxiliary_proposal_score_gap_conflict_minus_stable"] = (
+            summary["conflict_mean_auxiliary_proposal_score"] - summary["stable_mean_auxiliary_proposal_score"]
         )
     return summary
 
@@ -184,19 +221,27 @@ def build_markdown_report(
         lines.append(
             f"- Conflict minus stable future-span overlap gap: `{summary['future_span_overlap_gap_conflict_minus_stable']:.4f}`"
         )
+    if "auxiliary_proposal_count_gap_conflict_minus_stable" in summary:
+        lines.append(
+            f"- Conflict minus stable auxiliary proposal-count gap: `{summary['auxiliary_proposal_count_gap_conflict_minus_stable']:.4f}`"
+        )
+    if "auxiliary_proposal_score_gap_conflict_minus_stable" in summary:
+        lines.append(
+            f"- Conflict minus stable auxiliary proposal-score gap: `{summary['auxiliary_proposal_score_gap_conflict_minus_stable']:.4f}`"
+        )
 
     lines.extend(
         [
             "",
             "## Case table",
             "",
-            "| Family | Case | Expected | Tokens | Active | Mean future influence | Anchor-position mean | Span overlap | Max influence | Future loss |",
-            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            "| Family | Case | Expected | Tokens | Active | Aux proposals | Mean future influence | Anchor-position mean | Span overlap | Max influence | Future loss |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for item in results:
         lines.append(
-            "| {family} | {name} | {expected_mode} | {tokens} | {num_active} | {mean_future_influence:.4f} | "
+            "| {family} | {name} | {expected_mode} | {tokens} | {num_active} | {auxiliary_proposal_count} | {mean_future_influence:.4f} | "
             "{anchor_position_mean_future_influence:.4f} | {future_span_overlap_ratio:.4f} | {max_future_influence:.4f} | {future_loss:.4f} |".format(**item)
         )
 
@@ -233,6 +278,12 @@ def build_markdown_report(
             for span in item["future_hint_candidates"]:
                 lines.append(
                     f"  - `{span['start']}-{span['end']}` | mean `{span['mean_score']:.4f}` | text `{span['text']}`"
+                )
+        if item["auxiliary_proposals"]:
+            lines.append("- auxiliary proposals:")
+            for proposal in item["auxiliary_proposals"]:
+                lines.append(
+                    f"  - `{proposal['proposal_span'][0]}-{proposal['proposal_span'][1]}` | score `{proposal['proposal_score']:.4f}` | text `{proposal['proposal_text']}`"
                 )
         lines.append("")
 

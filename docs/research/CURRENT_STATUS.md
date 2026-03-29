@@ -1,6 +1,6 @@
 # Current Status
 
-Date: 2026-03-28
+Date: 2026-03-29
 
 ## What this repository is right now
 
@@ -111,3 +111,19 @@ There is now also a lightweight proposal-hint extraction path:
 - non-overlapping high future-influence spans can be surfaced as candidate proposal hints;
 - this is especially relevant for the current future-rescue families (`api_framework`, `quantifier`);
 - these hints are still diagnostic and exploratory, not yet wired into decoding or revision.
+
+The new offline auxiliary-proposal evaluation is slightly stronger than the earlier raw-hint reports:
+
+- conflict auxiliary proposal-count wins in `5/8` families;
+- conflict auxiliary proposal-score wins in `5/8` families;
+- mean conflict-minus-stable auxiliary proposal-count gap is `+0.6250`;
+- mean conflict-minus-stable auxiliary proposal-score gap is `+0.0352`.
+
+This is still not enough to claim a working proposal system. However, it is enough to say that the future-influence path is beginning to produce proposal-like conflict signals on top of a real pretrained model.
+
+The most useful current rescue examples remain:
+
+- `api_framework_conflict` → `a synchronous Django view`
+- `quantifier_conflict` → `a witness`
+
+Those spans are now visible as auxiliary proposal-like candidates even when the base detector underperforms on the same family.

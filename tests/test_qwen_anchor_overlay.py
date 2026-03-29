@@ -2,17 +2,24 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 import torch
 import torch.nn as nn
 
 from src.data.qwen_probe_cases import make_qwen_probe_cases
 from src.model.config import TOY_CONFIG
 from src.model.future_influence import FutureInfluenceScorer
-from src.model.future_span_hints import build_future_hint_candidates
+from src.model.future_span_hints import (
+    build_auxiliary_future_proposals,
+    build_future_hint_candidates,
+    is_informative_hint_text,
+    summarize_auxiliary_proposals,
+)
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from scripts.calibrate_qwen_anchor_thresholds import pairwise_family_metrics, score_configuration
 from scripts.analyze_qwen_span_misses import build_analysis, classify_family
 from scripts.compare_qwen_signal_proxies import compare_payloads
+from scripts.evaluate_qwen_auxiliary_proposals import build_auxiliary_report_data
 from scripts.extract_qwen_future_proposal_hints import extract_hint_candidates
 from scripts.run_qwen_future_influence_probe import (
     compute_span_anchor_overlap,
@@ -386,6 +393,44 @@ def test_build_future_hint_candidates_keeps_only_non_overlapping_spans():
     assert hints[0]["text"] == "hint"
 
 
+def test_is_informative_hint_text_filters_stopword_like_spans():
+    assert is_informative_hint_text("a witness") is True
+    assert is_informative_hint_text("the text starts") is True
+    assert is_informative_hint_text(" the ") is False
+    assert is_informative_hint_text(".") is False
+
+
+def test_build_auxiliary_future_proposals_averages_hidden_span():
+    hidden = torch.tensor([[1.0, 2.0], [3.0, 4.0], [10.0, 20.0]])
+    input_ids = torch.tensor([1, 2, 3], dtype=torch.long)
+    hints = [{"start": 0, "end": 1, "mean_score": 0.8, "text": "ab", "max_score": 0.9, "length": 2}]
+
+    proposals = build_auxiliary_future_proposals(
+        hidden=hidden,
+        input_ids=input_ids,
+        future_hint_candidates=hints,
+        tokenizer=_DummyTokenizer(),
+    )
+
+    assert len(proposals) == 1
+    assert proposals[0]["proposal_span"] == (0, 1)
+    assert torch.allclose(proposals[0]["repr"], torch.tensor([2.0, 3.0]))
+
+
+def test_summarize_auxiliary_proposals_reports_counts_and_scores():
+    batches = [
+        [{"proposal_score": 0.8}, {"proposal_score": 0.4}],
+        [],
+    ]
+
+    summary = summarize_auxiliary_proposals(batches)
+
+    assert summary["proposal_count"] == 2
+    assert summary["batch_with_proposals_count"] == 1
+    assert summary["mean_proposal_count_per_batch"] == 1.0
+    assert summary["mean_proposal_score"] == pytest.approx(0.6)
+
+
 def test_classify_family_distinguishes_rescue_patterns():
     assert classify_family(True, True, True) == "aligned"
     assert classify_family(False, True, False) == "future_rescue"
@@ -465,6 +510,100 @@ def test_extract_hint_candidates_prefers_non_overlapping_future_rescue_spans():
     assert hints[0]["classification"] == "future_rescue"
 
 
+def test_extract_hint_candidates_prefers_filtered_future_hint_candidates_when_present():
+    analysis = {
+        "families": [
+            {
+                "family": "alpha",
+                "classification": "future_rescue",
+                "anchor_future_gap": 0.5,
+            }
+        ]
+    }
+    future_payload = {
+        "results": [
+            {
+                "family": "alpha",
+                "name": "alpha_conflict",
+                "expected_mode": "conflict",
+                "active_anchor_spans": [{"start": 10, "end": 12}],
+                "future_hint_candidates": [
+                    {"start": 20, "end": 21, "mean_score": 0.9, "max_score": 1.0, "text": "hint"}
+                ],
+                "future_spans": [
+                    {"start": 30, "end": 30, "mean_score": 0.95, "max_score": 0.95, "text": "fallback"}
+                ],
+            }
+        ]
+    }
+
+    hints = extract_hint_candidates(future_payload, analysis)
+
+    assert len(hints) == 1
+    assert hints[0]["span_text"] == "hint"
+
+
+def test_build_auxiliary_report_data_tracks_future_rescue_gaps():
+    anchor_payload = {
+        "results": [
+            {"family": "alpha", "expected_mode": "stable", "mean_contradiction_pressure": 0.4, "mean_viability": 0.4},
+            {"family": "alpha", "expected_mode": "conflict", "mean_contradiction_pressure": 0.3, "mean_viability": 0.5},
+            {"family": "beta", "expected_mode": "stable", "mean_contradiction_pressure": 0.2, "mean_viability": 0.7},
+            {"family": "beta", "expected_mode": "conflict", "mean_contradiction_pressure": 0.4, "mean_viability": 0.3},
+        ]
+    }
+    future_payload = {
+        "results": [
+            {
+                "family": "alpha",
+                "expected_mode": "stable",
+                "anchor_position_mean_future_influence": 0.1,
+                "future_span_overlap_ratio": 0.0,
+                "auxiliary_proposal_count": 0,
+                "auxiliary_mean_proposal_score": 0.0,
+                "auxiliary_proposals": [],
+            },
+            {
+                "family": "alpha",
+                "expected_mode": "conflict",
+                "anchor_position_mean_future_influence": 0.5,
+                "future_span_overlap_ratio": 0.0,
+                "auxiliary_proposal_count": 2,
+                "auxiliary_mean_proposal_score": 0.8,
+                "auxiliary_proposals": [{"proposal_text": "hint one"}, {"proposal_text": "hint two"}],
+            },
+            {
+                "family": "beta",
+                "expected_mode": "stable",
+                "anchor_position_mean_future_influence": 0.2,
+                "future_span_overlap_ratio": 0.0,
+                "auxiliary_proposal_count": 1,
+                "auxiliary_mean_proposal_score": 0.6,
+                "auxiliary_proposals": [{"proposal_text": "stable"}],
+            },
+            {
+                "family": "beta",
+                "expected_mode": "conflict",
+                "anchor_position_mean_future_influence": 0.4,
+                "future_span_overlap_ratio": 0.1,
+                "auxiliary_proposal_count": 1,
+                "auxiliary_mean_proposal_score": 0.4,
+                "auxiliary_proposals": [{"proposal_text": "conflict"}],
+            },
+        ]
+    }
+
+    report_data = build_auxiliary_report_data(anchor_payload, future_payload)
+
+    assert report_data["summary"]["family_count"] == 2
+    assert report_data["summary"]["count_wins"] == 1
+    assert report_data["summary"]["score_wins"] == 1
+    assert report_data["summary"]["future_rescue_count"] == 1
+    alpha_row = next(row for row in report_data["families"] if row["family"] == "alpha")
+    assert alpha_row["classification"] == "future_rescue"
+    assert alpha_row["aux_count_gap"] == 2
+
+
 def test_qwen_overlay_emits_future_hint_batches():
     model = _DummyCausalLM()
     tokenizer = _DummyTokenizer()
@@ -481,3 +620,5 @@ def test_qwen_overlay_emits_future_hint_batches():
     assert "future_hint_batches" in out
     assert len(out["future_hint_batches"]) == 1
     assert "future_hint_candidates" in out["future_hint_batches"][0]
+    assert "auxiliary_proposal_batches" in out
+    assert "auxiliary_proposal_diagnostics" in out

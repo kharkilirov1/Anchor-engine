@@ -38,10 +38,15 @@ def extract_hint_candidates(
         if family_row is None or family_row["classification"] not in allowed:
             continue
 
-        active_anchor_spans = item.get("active_anchor_spans", [])
-        for span in item.get("future_spans", []):
-            if any(spans_overlap(span, anchor_span) for anchor_span in active_anchor_spans):
-                continue
+        hint_spans = item.get("future_hint_candidates")
+        if not hint_spans:
+            active_anchor_spans = item.get("active_anchor_spans", [])
+            hint_spans = []
+            for span in item.get("future_spans", []):
+                if any(spans_overlap(span, anchor_span) for anchor_span in active_anchor_spans):
+                    continue
+                hint_spans.append(span)
+        for span in hint_spans:
             hint_score = float(span["mean_score"]) * (1.0 + max(0.0, float(family_row["anchor_future_gap"])))
             hints.append(
                 {
@@ -54,7 +59,7 @@ def extract_hint_candidates(
                     "span_text": span["text"],
                     "span_mean_score": float(span["mean_score"]),
                     "span_max_score": float(span["max_score"]),
-                    "active_anchor_spans": active_anchor_spans,
+                    "active_anchor_spans": item.get("active_anchor_spans", []),
                 }
             )
 

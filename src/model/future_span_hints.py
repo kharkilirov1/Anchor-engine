@@ -4,6 +4,36 @@ from typing import Any
 
 import torch
 
+_STOPWORD_HINTS = {
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "to",
+    "of",
+    "in",
+    "on",
+    "by",
+    "for",
+    "that",
+    "same",
+}
+
+
+def is_informative_hint_text(text: str) -> bool:
+    cleaned = text.strip().lower()
+    if not cleaned:
+        return False
+    if not any(char.isalnum() for char in cleaned):
+        return False
+    words = [word for word in cleaned.replace("-", " ").split() if word]
+    if not words:
+        return False
+    if len(words) <= 2 and all(word in _STOPWORD_HINTS for word in words):
+        return False
+    return True
+
 
 def decode_span_text(tokenizer: Any, token_ids: list[int]) -> str:
     if tokenizer is None:
@@ -105,6 +135,8 @@ def build_future_hint_candidates(
     for span in future_spans:
         if any(spans_overlap(span, anchor_span) for anchor_span in active_anchor_spans):
             continue
+        if not is_informative_hint_text(str(span["text"])):
+            continue
         hints.append(
             {
                 "start": int(span["start"]),
@@ -117,3 +149,43 @@ def build_future_hint_candidates(
         )
     hints.sort(key=lambda item: (item["mean_score"], item["length"], item["max_score"]), reverse=True)
     return hints
+
+
+def build_auxiliary_future_proposals(
+    hidden: torch.Tensor,
+    input_ids: torch.Tensor,
+    future_hint_candidates: list[dict[str, Any]],
+    tokenizer: Any,
+    max_candidates: int = 3,
+) -> list[dict[str, Any]]:
+    proposals: list[dict[str, Any]] = []
+    for hint in future_hint_candidates[:max_candidates]:
+        start = max(0, min(int(hint["start"]), hidden.size(0) - 1))
+        end = max(start, min(int(hint["end"]), hidden.size(0) - 1))
+        span_hidden = hidden[start : end + 1]
+        span_ids = [int(token.item()) for token in input_ids[start : end + 1]]
+        proposals.append(
+            {
+                "proposal_type": "future_hint_span",
+                "proposal_score": float(hint["mean_score"]),
+                "proposal_span": (start, end),
+                "proposal_root_token": span_ids[0] if span_ids else None,
+                "proposal_text": decode_span_text(tokenizer, span_ids),
+                "repr": span_hidden.mean(dim=0).detach(),
+            }
+        )
+    return proposals
+
+
+def summarize_auxiliary_proposals(
+    proposal_batches: list[list[dict[str, Any]]],
+) -> dict[str, float]:
+    counts = [len(batch) for batch in proposal_batches]
+    all_scores = [float(item["proposal_score"]) for batch in proposal_batches for item in batch]
+    return {
+        "proposal_count": int(sum(counts)),
+        "batch_with_proposals_count": int(sum(1 for count in counts if count > 0)),
+        "mean_proposal_count_per_batch": float(sum(counts) / max(len(counts), 1)),
+        "mean_proposal_score": float(sum(all_scores) / max(len(all_scores), 1)) if all_scores else 0.0,
+        "max_proposal_score": max(all_scores) if all_scores else 0.0,
+    }
