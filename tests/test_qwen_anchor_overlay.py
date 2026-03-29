@@ -11,7 +11,11 @@ from src.model.future_influence import FutureInfluenceScorer
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from scripts.calibrate_qwen_anchor_thresholds import pairwise_family_metrics, score_configuration
 from scripts.compare_qwen_signal_proxies import compare_payloads
-from scripts.run_qwen_future_influence_probe import summarize_results as summarize_future_results
+from scripts.run_qwen_future_influence_probe import (
+    compute_span_anchor_overlap,
+    extract_high_influence_spans,
+    summarize_results as summarize_future_results,
+)
 from scripts.run_qwen_anchor_probe import build_markdown_report, summarize_results
 
 
@@ -66,6 +70,10 @@ class _DummyTokenizer:
         padded = nn.utils.rnn.pad_sequence(rows, batch_first=True, padding_value=0)
         mask = (padded != 0).long()
         return {"input_ids": padded, "attention_mask": mask}
+
+    def decode(self, token_ids: list[int], skip_special_tokens: bool = False) -> str:
+        del skip_special_tokens
+        return "".join(chr((token_id % 26) + 97) for token_id in token_ids)
 
 
 def test_qwen_anchor_overlay_forward_returns_diagnostics():
@@ -330,3 +338,33 @@ def test_compare_qwen_signal_proxies_tracks_family_wins():
     assert comparison["summary"]["viability_wins"] == 1
     assert comparison["summary"]["future_wins"] == 0
     assert comparison["summary"]["anchor_future_wins"] == 1
+
+
+def test_extract_high_influence_spans_groups_contiguous_positions():
+    tokenizer = _DummyTokenizer()
+    scores = torch.tensor([0.1, 0.8, 0.9, 0.2, 0.85, 0.9], dtype=torch.float32)
+    input_ids = torch.tensor([10, 11, 12, 13, 14, 15], dtype=torch.long)
+
+    spans = extract_high_influence_spans(
+        scores=scores,
+        input_ids=input_ids,
+        tokenizer=tokenizer,
+        min_score=0.75,
+        top_spans=4,
+    )
+
+    assert len(spans) == 2
+    assert spans[0]["start"] == 4
+    assert spans[0]["end"] == 5
+    assert spans[1]["start"] == 1
+    assert spans[1]["end"] == 2
+
+
+def test_compute_span_anchor_overlap_reports_bidirectional_overlap():
+    future_spans = [{"start": 2, "end": 4}, {"start": 8, "end": 9}]
+    active_anchor_spans = [{"start": 3, "end": 5}, {"start": 10, "end": 12}]
+
+    overlap = compute_span_anchor_overlap(future_spans, active_anchor_spans)
+
+    assert overlap["future_span_overlap_ratio"] == 0.5
+    assert overlap["anchor_span_overlap_ratio"] == 0.5

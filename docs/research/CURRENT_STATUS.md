@@ -91,3 +91,8 @@ A direct proxy comparison currently suggests:
 - anchor-position future influence wins in `5/8` families.
 
 So the current best reading is that future-conditioned attribution is more useful as an anchor-local relevance probe than as a global prompt-level scorer.
+
+The next refinement step is now partially implemented:
+
+- high future-influence positions can be grouped into contiguous spans;
+- those spans can be compared against current active anchor spans to measure overlap and possible detector misses.
