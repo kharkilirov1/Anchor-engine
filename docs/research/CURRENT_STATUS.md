@@ -96,3 +96,12 @@ The next refinement step is now partially implemented:
 
 - high future-influence positions can be grouped into contiguous spans;
 - those spans can be compared against current active anchor spans to measure overlap and possible detector misses.
+
+On the current 8-family Qwen suite, the span miss analysis splits the families into four buckets:
+
+- aligned: `proof_mode`, `entity_property`
+- future_rescue: `api_framework`, `quantifier`
+- delta_only: `instruction_constraints`, `legal_scope`
+- both_weak: `induction`, `units`
+
+This is useful because it suggests future-conditioned attribution may already help in families where the current detector underperforms, even though it is still weaker as a global scorer.

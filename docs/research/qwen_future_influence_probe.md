@@ -1,10 +1,12 @@
 # Qwen Future Influence Probe
 
-Date: 2026-03-29 04:34 UTC
+Date: 2026-03-29 06:54 UTC
 Model: `Qwen/Qwen2.5-1.5B`
 Device: `cpu`
 Max length: `192`
 Future window: `16`
+Span threshold: `0.75`
+Top spans per case: `4`
 Seed: `7`
 
 ## Summary
@@ -14,27 +16,28 @@ Seed: `7`
 - Conflict cases: `8`
 - Conflict minus stable mean future influence gap: `-0.0250`
 - Conflict minus stable active-anchor future influence gap: `0.2610`
+- Conflict minus stable future-span overlap gap: `0.0417`
 
 ## Case table
 
-| Family | Case | Expected | Tokens | Active | Mean future influence | Anchor-position mean | Max influence | Future loss |
-|---|---|---|---:|---:|---:|---:|---:|---:|
-| quantifier | quantifier_stable | stable | 27 | 3 | 0.3867 | 0.3617 | 1.0000 | 4.2500 |
-| quantifier | quantifier_conflict | conflict | 32 | 5 | 0.3555 | 0.4867 | 1.0000 | 5.2188 |
-| proof_mode | proof_mode_stable | stable | 31 | 2 | 0.2637 | 0.0000 | 1.0000 | 3.2031 |
-| proof_mode | proof_mode_conflict | conflict | 27 | 2 | 0.3984 | 0.4336 | 1.0000 | 3.6562 |
-| induction | induction_stable | stable | 29 | 3 | 0.3105 | 0.2669 | 1.0000 | 3.1875 |
-| induction | induction_conflict | conflict | 34 | 1 | 0.2988 | 0.8047 | 1.0000 | 3.9062 |
-| api_framework | api_framework_stable | stable | 30 | 1 | 0.3145 | 0.0000 | 1.0000 | 3.2656 |
-| api_framework | api_framework_conflict | conflict | 30 | 1 | 0.3730 | 0.8398 | 1.0000 | 5.1875 |
-| instruction_constraints | instruction_constraints_stable | stable | 28 | 3 | 0.4355 | 0.5221 | 1.0000 | 4.4062 |
-| instruction_constraints | instruction_constraints_conflict | conflict | 36 | 2 | 0.3477 | 0.2012 | 1.0000 | 5.7812 |
-| entity_property | entity_property_stable | stable | 32 | 1 | 0.2969 | 0.0000 | 1.0000 | 3.7188 |
-| entity_property | entity_property_conflict | conflict | 33 | 1 | 0.3281 | 0.9102 | 1.0000 | 3.5938 |
-| legal_scope | legal_scope_stable | stable | 28 | 3 | 0.4316 | 0.3216 | 1.0000 | 4.3750 |
-| legal_scope | legal_scope_conflict | conflict | 37 | 2 | 0.2295 | 0.0000 | 1.0000 | 4.9062 |
-| units | units_stable | stable | 31 | 2 | 0.3125 | 0.2109 | 1.0000 | 3.9219 |
-| units | units_conflict | conflict | 46 | 3 | 0.2207 | 0.0951 | 1.0000 | 3.6094 |
+| Family | Case | Expected | Tokens | Active | Mean future influence | Anchor-position mean | Span overlap | Max influence | Future loss |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| quantifier | quantifier_stable | stable | 27 | 3 | 0.3867 | 0.3617 | 0.5000 | 1.0000 | 4.2500 |
+| quantifier | quantifier_conflict | conflict | 32 | 5 | 0.3555 | 0.4867 | 0.5000 | 1.0000 | 5.2188 |
+| proof_mode | proof_mode_stable | stable | 31 | 2 | 0.2637 | 0.0000 | 0.0000 | 1.0000 | 3.2031 |
+| proof_mode | proof_mode_conflict | conflict | 27 | 2 | 0.3984 | 0.4336 | 0.2500 | 1.0000 | 3.6562 |
+| induction | induction_stable | stable | 29 | 3 | 0.3105 | 0.2669 | 0.3333 | 1.0000 | 3.1875 |
+| induction | induction_conflict | conflict | 34 | 1 | 0.2988 | 0.8047 | 0.2500 | 1.0000 | 3.9062 |
+| api_framework | api_framework_stable | stable | 30 | 1 | 0.3145 | 0.0000 | 0.0000 | 1.0000 | 3.2656 |
+| api_framework | api_framework_conflict | conflict | 30 | 1 | 0.3730 | 0.8398 | 0.2500 | 1.0000 | 5.1875 |
+| instruction_constraints | instruction_constraints_stable | stable | 28 | 3 | 0.4355 | 0.5221 | 0.2500 | 1.0000 | 4.4062 |
+| instruction_constraints | instruction_constraints_conflict | conflict | 36 | 2 | 0.3477 | 0.2012 | 0.2500 | 1.0000 | 5.7812 |
+| entity_property | entity_property_stable | stable | 32 | 1 | 0.2969 | 0.0000 | 0.0000 | 1.0000 | 3.7188 |
+| entity_property | entity_property_conflict | conflict | 33 | 1 | 0.3281 | 0.9102 | 0.2500 | 1.0000 | 3.5938 |
+| legal_scope | legal_scope_stable | stable | 28 | 3 | 0.4316 | 0.3216 | 0.2500 | 1.0000 | 4.3750 |
+| legal_scope | legal_scope_conflict | conflict | 37 | 2 | 0.2295 | 0.0000 | 0.0000 | 1.0000 | 4.9062 |
+| units | units_stable | stable | 31 | 2 | 0.3125 | 0.2109 | 0.3333 | 1.0000 | 3.9219 |
+| units | units_conflict | conflict | 46 | 3 | 0.2207 | 0.0951 | 0.2500 | 1.0000 | 3.6094 |
 
 ## Top future-influence tokens
 
@@ -150,8 +153,133 @@ Seed: `7`
 - pos `33` | token ` already` | id `2669` | score `0.9258`
 - pos `40` | token `.` | id `13` | score `0.8984`
 
+## High future-influence spans
+
+### quantifier_stable
+- span `18-18` | mean `1.0000` | max `1.0000` | text ` a`
+- span `11-11` | mean `0.8867` | max `0.8867` | text ` the`
+- span `15-15` | mean `0.8789` | max `0.8789` | text `.`
+- span `22-24` | mean `0.8750` | max `0.8984` | text ` a universal mathematical`
+- active anchor spans: `14-15, 18-19, 25-26`
+- future-span overlap ratio: `0.5000` | anchor-span overlap ratio: `0.6667`
+
+### quantifier_conflict
+- span `24-25` | mean `0.9531` | max `1.0000` | text ` a witness`
+- span `17-20` | mean `0.8516` | max `0.9062` | text ` the text shifts toward`
+- span `27-27` | mean `0.8281` | max `0.8281` | text `.`
+- span `29-29` | mean `0.7617` | max `0.7617` | text ` the`
+- active anchor spans: `11-12, 14-15, 17-18, 26-27, 30-31`
+- future-span overlap ratio: `0.5000` | anchor-span overlap ratio: `0.4000`
+
+### proof_mode_stable
+- span `19-19` | mean `1.0000` | max `1.0000` | text ` a`
+- span `28-28` | mean `0.8633` | max `0.8633` | text `iction`
+- span `22-22` | mean `0.8594` | max `0.8594` | text ` preserves`
+- span `14-14` | mean `0.8516` | max `0.8516` | text ` claim`
+- active anchor spans: `7-8, 29-30`
+- future-span overlap ratio: `0.0000` | anchor-span overlap ratio: `0.0000`
+
+### proof_mode_conflict
+- span `21-21` | mean `1.0000` | max `1.0000` | text ` proof`
+- span `10-10` | mean `0.8945` | max `0.8945` | text ` Half`
+- span `19-19` | mean `0.8828` | max `0.8828` | text ` a`
+- span `23-24` | mean `0.8438` | max `0.8672` | text `. Continue`
+- active anchor spans: `7-8, 22-23`
+- future-span overlap ratio: `0.2500` | anchor-span overlap ratio: `0.5000`
+
+### induction_stable
+- span `25-26` | mean `0.9609` | max `1.0000` | text ` in induction`
+- span `21-21` | mean `0.8008` | max `0.8008` | text `.`
+- span `18-18` | mean `0.7578` | max `0.7578` | text ` the`
+- active anchor spans: `2-3, 7-8, 20-21`
+- future-span overlap ratio: `0.3333` | anchor-span overlap ratio: `0.3333`
+
+### induction_conflict
+- span `26-27` | mean `0.9961` | max `1.0000` | text ` the induction`
+- span `22-23` | mean `0.8359` | max `0.8789` | text ` arbitrary example`
+- span `29-29` | mean `0.8047` | max `0.8047` | text `.`
+- span `18-18` | mean `0.7500` | max `0.7500` | text ` starts`
+- active anchor spans: `28-29`
+- future-span overlap ratio: `0.2500` | anchor-span overlap ratio: `1.0000`
+
+### api_framework_stable
+- span `20-20` | mean `1.0000` | max `1.0000` | text `.`
+- span `15-15` | mean `0.9766` | max `0.9766` | text ` and`
+- span `26-27` | mean `0.9336` | max `0.9336` | text ` that same`
+- span `22-23` | mean `0.8906` | max `0.9297` | text ` the technical`
+- active anchor spans: `10-11`
+- future-span overlap ratio: `0.0000` | anchor-span overlap ratio: `0.0000`
+
+### api_framework_conflict
+- span `19-22` | mean `0.8828` | max `1.0000` | text ` a synchronous Django view`
+- span `24-24` | mean `0.8398` | max `0.8398` | text `.`
+- span `26-26` | mean `0.8281` | max `0.8281` | text ` the`
+- span `13-15` | mean `0.8203` | max `0.8594` | text ` the text starts`
+- active anchor spans: `23-24`
+- future-span overlap ratio: `0.2500` | anchor-span overlap ratio: `1.0000`
+
+### instruction_constraints_stable
+- span `17-17` | mean `0.9492` | max `0.9492` | text `.`
+- span `19-19` | mean `0.9336` | max `0.9336` | text ` by`
+- span `21-25` | mean `0.9062` | max `1.0000` | text ` the answer while preserving those`
+- span `14-15` | mean `0.8789` | max `0.9648` | text ` and avoid`
+- active anchor spans: `10-11, 17-18, 26-27`
+- future-span overlap ratio: `0.2500` | anchor-span overlap ratio: `0.3333`
+
+### instruction_constraints_conflict
+- span `19-21` | mean `0.8633` | max `0.9336` | text ` the text starts`
+- span `33-34` | mean `0.8633` | max `0.9180` | text ` the planning`
+- span `31-31` | mean `0.8633` | max `0.8633` | text `.`
+- span `28-29` | mean `0.8594` | max `0.8867` | text ` with creative`
+- active anchor spans: `10-11, 31-32`
+- future-span overlap ratio: `0.2500` | anchor-span overlap ratio: `0.5000`
+
+### entity_property_stable
+- span `28-29` | mean `0.9609` | max `1.0000` | text ` that allergy`
+- span `21-21` | mean `0.8984` | max `0.8984` | text `.`
+- span `23-26` | mean `0.8203` | max `0.8789` | text ` the clinical note while`
+- active anchor spans: `30-31`
+- future-span overlap ratio: `0.0000` | anchor-span overlap ratio: `0.0000`
+
+### entity_property_conflict
+- span `25-25` | mean `1.0000` | max `1.0000` | text `-line`
+- span `22-23` | mean `0.9336` | max `0.9727` | text ` the routine`
+- span `29-30` | mean `0.9336` | max `0.9727` | text ` the clinical`
+- span `27-27` | mean `0.9102` | max `0.9102` | text `.`
+- active anchor spans: `26-27`
+- future-span overlap ratio: `0.2500` | anchor-span overlap ratio: `1.0000`
+
+### legal_scope_stable
+- span `18-18` | mean `0.9648` | max `0.9648` | text `.`
+- span `14-16` | mean `0.8711` | max `0.9336` | text ` for non-commercial`
+- span `20-24` | mean `0.8672` | max `1.0000` | text ` the clause while preserving those`
+- span `12-12` | mean `0.8438` | max `0.8438` | text ` and`
+- active anchor spans: `8-9, 17-18, 26-27`
+- future-span overlap ratio: `0.2500` | anchor-span overlap ratio: `0.3333`
+
+### legal_scope_conflict
+- span `29-29` | mean `1.0000` | max `1.0000` | text ` commercial`
+- active anchor spans: `8-9, 35-36`
+- future-span overlap ratio: `0.0000` | anchor-span overlap ratio: `0.0000`
+
+### units_stable
+- span `19-19` | mean `0.8984` | max `0.8984` | text `.`
+- span `21-24` | mean `0.8398` | max `1.0000` | text ` the calculation notes while`
+- span `26-28` | mean `0.8164` | max `0.8828` | text ` the same unit`
+- active anchor spans: `2-3, 19-20`
+- future-span overlap ratio: `0.3333` | anchor-span overlap ratio: `0.5000`
+
+### units_conflict
+- span `36-36` | mean `0.9648` | max `0.9648` | text ` meters`
+- span `32-33` | mean `0.9609` | max `0.9922` | text ` were already`
+- span `42-43` | mean `0.9414` | max `1.0000` | text ` the calculation`
+- span `40-40` | mean `0.8984` | max `0.8984` | text `.`
+- active anchor spans: `2-3, 13-14, 40-41`
+- future-span overlap ratio: `0.2500` | anchor-span overlap ratio: `0.3333`
+
 ## Interpretation
 
 - This report is an experimental midpoint between delta-hidden heuristics and full leave-one-out KL.
 - Scores are based on gradient influence of token positions on a future autoregressive loss window.
 - High-scoring positions are candidates for semantically important context even when local hidden-state jumps are ambiguous.
+- Grouped high-influence spans help test whether future-attribution concentrates on the same regions as current active anchors or highlights missed context spans.

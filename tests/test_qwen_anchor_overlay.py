@@ -10,6 +10,7 @@ from src.model.config import TOY_CONFIG
 from src.model.future_influence import FutureInfluenceScorer
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from scripts.calibrate_qwen_anchor_thresholds import pairwise_family_metrics, score_configuration
+from scripts.analyze_qwen_span_misses import build_analysis, classify_family
 from scripts.compare_qwen_signal_proxies import compare_payloads
 from scripts.run_qwen_future_influence_probe import (
     compute_span_anchor_overlap,
@@ -368,3 +369,35 @@ def test_compute_span_anchor_overlap_reports_bidirectional_overlap():
 
     assert overlap["future_span_overlap_ratio"] == 0.5
     assert overlap["anchor_span_overlap_ratio"] == 0.5
+
+
+def test_classify_family_distinguishes_rescue_patterns():
+    assert classify_family(True, True, True) == "aligned"
+    assert classify_family(False, True, False) == "future_rescue"
+    assert classify_family(True, False, False) == "delta_only"
+    assert classify_family(False, False, False) == "both_weak"
+
+
+def test_build_analysis_summarizes_family_classes():
+    anchor_payload = {
+        "results": [
+            {"family": "alpha", "expected_mode": "stable", "mean_contradiction_pressure": 0.2, "mean_viability": 0.7},
+            {"family": "alpha", "expected_mode": "conflict", "mean_contradiction_pressure": 0.5, "mean_viability": 0.2},
+            {"family": "beta", "expected_mode": "stable", "mean_contradiction_pressure": 0.4, "mean_viability": 0.3},
+            {"family": "beta", "expected_mode": "conflict", "mean_contradiction_pressure": 0.3, "mean_viability": 0.4},
+        ]
+    }
+    future_payload = {
+        "results": [
+            {"family": "alpha", "expected_mode": "stable", "anchor_position_mean_future_influence": 0.1, "future_span_overlap_ratio": 0.0},
+            {"family": "alpha", "expected_mode": "conflict", "anchor_position_mean_future_influence": 0.6, "future_span_overlap_ratio": 0.5},
+            {"family": "beta", "expected_mode": "stable", "anchor_position_mean_future_influence": 0.2, "future_span_overlap_ratio": 0.0},
+            {"family": "beta", "expected_mode": "conflict", "anchor_position_mean_future_influence": 0.4, "future_span_overlap_ratio": 0.1},
+        ]
+    }
+
+    analysis = build_analysis(anchor_payload, future_payload)
+
+    assert analysis["summary"]["family_count"] == 2
+    assert analysis["summary"]["aligned_count"] == 1
+    assert analysis["summary"]["future_rescue_count"] == 1
