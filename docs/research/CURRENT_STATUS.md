@@ -82,3 +82,12 @@ This scorer does **not** yet cleanly separate stable vs conflict cases by simple
 - the future-influence idea is worth keeping as an exploratory direction;
 - it is not yet a replacement for the existing anchor diagnostics;
 - the most useful signal may be position-specific span relevance rather than one scalar per prompt.
+
+A direct proxy comparison currently suggests:
+
+- delta-pressure wins in `5/8` families;
+- delta-viability wins in `5/8` families;
+- raw mean future influence wins in only `3/8` families;
+- anchor-position future influence wins in `5/8` families.
+
+So the current best reading is that future-conditioned attribution is more useful as an anchor-local relevance probe than as a global prompt-level scorer.

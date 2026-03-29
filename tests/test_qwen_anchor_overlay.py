@@ -10,6 +10,7 @@ from src.model.config import TOY_CONFIG
 from src.model.future_influence import FutureInfluenceScorer
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from scripts.calibrate_qwen_anchor_thresholds import pairwise_family_metrics, score_configuration
+from scripts.compare_qwen_signal_proxies import compare_payloads
 from scripts.run_qwen_future_influence_probe import summarize_results as summarize_future_results
 from scripts.run_qwen_anchor_probe import build_markdown_report, summarize_results
 
@@ -286,3 +287,46 @@ def test_future_influence_summary_tracks_mode_gap():
 
     assert summary["future_influence_gap_conflict_minus_stable"] > 0
     assert summary["anchor_future_influence_gap_conflict_minus_stable"] > 0
+
+
+def test_compare_qwen_signal_proxies_tracks_family_wins():
+    anchor_payload = {
+        "results": [
+            {
+                "family": "toy",
+                "expected_mode": "stable",
+                "mean_contradiction_pressure": 0.2,
+                "mean_viability": 0.7,
+            },
+            {
+                "family": "toy",
+                "expected_mode": "conflict",
+                "mean_contradiction_pressure": 0.4,
+                "mean_viability": 0.3,
+            },
+        ]
+    }
+    future_payload = {
+        "results": [
+            {
+                "family": "toy",
+                "expected_mode": "stable",
+                "mean_future_influence": 0.2,
+                "anchor_position_mean_future_influence": 0.1,
+            },
+            {
+                "family": "toy",
+                "expected_mode": "conflict",
+                "mean_future_influence": 0.1,
+                "anchor_position_mean_future_influence": 0.5,
+            },
+        ]
+    }
+
+    comparison = compare_payloads(anchor_payload, future_payload)
+
+    assert comparison["summary"]["family_count"] == 1
+    assert comparison["summary"]["pressure_wins"] == 1
+    assert comparison["summary"]["viability_wins"] == 1
+    assert comparison["summary"]["future_wins"] == 0
+    assert comparison["summary"]["anchor_future_wins"] == 1
