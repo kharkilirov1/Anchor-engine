@@ -17,97 +17,12 @@ if str(ROOT) not in sys.path:
 from src.data.qwen_probe_cases import make_qwen_probe_cases
 from src.model.config import TOY_CONFIG
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
-
-
-def decode_span_text(tokenizer: Any, token_ids: list[int]) -> str:
-    if tokenizer is None:
-        return " ".join(str(token_id) for token_id in token_ids)
-    try:
-        text = tokenizer.decode(token_ids, skip_special_tokens=False)
-    except TypeError:
-        text = tokenizer.decode(token_ids)
-    return text.replace("\n", "\\n")
-
-
-def safe_decode_token(tokenizer: Any, token_id: int) -> str:
-    if tokenizer is None:
-        return str(token_id)
-    try:
-        text = tokenizer.decode([token_id], skip_special_tokens=False)
-    except TypeError:
-        text = tokenizer.decode([token_id])
-    return text.replace("\n", "\\n")
-
-
-def extract_high_influence_spans(
-    scores: torch.Tensor,
-    input_ids: torch.Tensor,
-    tokenizer: Any,
-    min_score: float,
-    top_spans: int,
-) -> list[dict[str, Any]]:
-    selected = [
-        idx
-        for idx, value in enumerate(scores.tolist())
-        if float(value) >= float(min_score)
-    ]
-    if not selected:
-        return []
-
-    spans: list[tuple[int, int]] = []
-    start = selected[0]
-    prev = selected[0]
-    for idx in selected[1:]:
-        if idx == prev + 1:
-            prev = idx
-            continue
-        spans.append((start, prev))
-        start = idx
-        prev = idx
-    spans.append((start, prev))
-
-    ranked: list[dict[str, Any]] = []
-    for start_idx, end_idx in spans:
-        span_scores = scores[start_idx : end_idx + 1]
-        token_ids = [int(token.item()) for token in input_ids[start_idx : end_idx + 1]]
-        ranked.append(
-            {
-                "start": int(start_idx),
-                "end": int(end_idx),
-                "length": int(end_idx - start_idx + 1),
-                "mean_score": float(span_scores.mean().item()),
-                "max_score": float(span_scores.max().item()),
-                "token_ids": token_ids,
-                "text": decode_span_text(tokenizer, token_ids),
-            }
-        )
-    ranked.sort(key=lambda item: (item["mean_score"], item["length"], item["max_score"]), reverse=True)
-    return ranked[:top_spans]
-
-
-def compute_span_anchor_overlap(
-    future_spans: list[dict[str, Any]],
-    active_anchor_spans: list[dict[str, int]],
-) -> dict[str, float]:
-    if not future_spans:
-        return {
-            "future_span_overlap_ratio": 0.0,
-            "anchor_span_overlap_ratio": 0.0,
-        }
-
-    def overlaps(span_a: dict[str, int], span_b: dict[str, int]) -> bool:
-        return not (span_a["end"] < span_b["start"] or span_b["end"] < span_a["start"])
-
-    future_overlap = sum(
-        1 for span in future_spans if any(overlaps(span, anchor) for anchor in active_anchor_spans)
-    )
-    anchor_overlap = sum(
-        1 for anchor in active_anchor_spans if any(overlaps(anchor, span) for span in future_spans)
-    )
-    return {
-        "future_span_overlap_ratio": future_overlap / max(len(future_spans), 1),
-        "anchor_span_overlap_ratio": anchor_overlap / max(len(active_anchor_spans), 1) if active_anchor_spans else 0.0,
-    }
+from src.model.future_span_hints import (
+    build_future_hint_candidates,
+    compute_span_anchor_overlap,
+    extract_high_influence_spans,
+    safe_decode_token,
+)
 
 
 def collect_case_result(
@@ -165,6 +80,7 @@ def collect_case_result(
         min_score=span_threshold,
         top_spans=top_spans,
     )
+    future_hint_candidates = build_future_hint_candidates(future_spans, active_anchor_spans)
     overlap = compute_span_anchor_overlap(future_spans, active_anchor_spans)
     return {
         "name": case_name,
@@ -185,6 +101,7 @@ def collect_case_result(
         "anchor_positions": anchor_positions,
         "active_anchor_spans": active_anchor_spans,
         "future_spans": future_spans,
+        "future_hint_candidates": future_hint_candidates,
         **overlap,
         "top_future_tokens": top_tokens,
     }
@@ -311,6 +228,12 @@ def build_markdown_report(
         lines.append(
             f"- future-span overlap ratio: `{item['future_span_overlap_ratio']:.4f}` | anchor-span overlap ratio: `{item['anchor_span_overlap_ratio']:.4f}`"
         )
+        if item["future_hint_candidates"]:
+            lines.append("- proposal-like future hint spans:")
+            for span in item["future_hint_candidates"]:
+                lines.append(
+                    f"  - `{span['start']}-{span['end']}` | mean `{span['mean_score']:.4f}` | text `{span['text']}`"
+                )
         lines.append("")
 
     lines.extend(

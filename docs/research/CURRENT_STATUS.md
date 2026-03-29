@@ -105,3 +105,9 @@ On the current 8-family Qwen suite, the span miss analysis splits the families i
 - both_weak: `induction`, `units`
 
 This is useful because it suggests future-conditioned attribution may already help in families where the current detector underperforms, even though it is still weaker as a global scorer.
+
+There is now also a lightweight proposal-hint extraction path:
+
+- non-overlapping high future-influence spans can be surfaced as candidate proposal hints;
+- this is especially relevant for the current future-rescue families (`api_framework`, `quantifier`);
+- these hints are still diagnostic and exploratory, not yet wired into decoding or revision.

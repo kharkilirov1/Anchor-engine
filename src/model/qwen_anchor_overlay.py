@@ -13,6 +13,11 @@ from src.model.anchor_revision import RevisionController
 from src.model.anchor_viability import ViabilityTracker
 from src.model.config import ModelConfig, TOY_CONFIG
 from src.model.future_influence import FutureInfluenceScorer
+from src.model.future_span_hints import (
+    build_future_hint_candidates,
+    compute_span_anchor_overlap,
+    extract_high_influence_spans,
+)
 
 
 class QwenAnchorOverlay(nn.Module):
@@ -193,6 +198,8 @@ class QwenAnchorOverlay(nn.Module):
         texts: list[str],
         max_length: int = 256,
         future_window: int = 16,
+        span_threshold: float = 0.75,
+        top_spans: int = 5,
     ) -> tuple[dict[str, Any], dict[str, torch.Tensor]]:
         if self.tokenizer is None:
             raise ValueError("tokenizer is required for analyze_texts_with_future_influence")
@@ -214,4 +221,40 @@ class QwenAnchorOverlay(nn.Module):
             attention_mask=batch.get("attention_mask"),
             future_window=future_window,
         )
+        hint_batches: list[dict[str, Any]] = []
+        scores = out["future_influence"]["scores"]
+        masks = batch.get("attention_mask")
+        for batch_idx in range(batch["input_ids"].size(0)):
+            valid_len = (
+                int(masks[batch_idx].sum().item())
+                if masks is not None
+                else int(batch["input_ids"][batch_idx].numel())
+            )
+            trimmed_scores = scores[batch_idx, :valid_len]
+            trimmed_ids = batch["input_ids"][batch_idx, :valid_len]
+            active_anchor_spans = [
+                {
+                    "start": max(0, min(int(anchor.start_idx), valid_len - 1)),
+                    "end": max(0, min(int(anchor.end_idx), valid_len - 1)),
+                }
+                for anchor in out["active_anchors"][batch_idx]
+                if valid_len > 0
+            ]
+            future_spans = extract_high_influence_spans(
+                scores=trimmed_scores,
+                input_ids=trimmed_ids,
+                tokenizer=self.tokenizer,
+                min_score=span_threshold,
+                top_spans=top_spans,
+            )
+            overlap = compute_span_anchor_overlap(future_spans, active_anchor_spans)
+            hint_batches.append(
+                {
+                    "active_anchor_spans": active_anchor_spans,
+                    "future_spans": future_spans,
+                    "future_hint_candidates": build_future_hint_candidates(future_spans, active_anchor_spans),
+                    **overlap,
+                }
+            )
+        out["future_hint_batches"] = hint_batches
         return out, batch
