@@ -131,17 +131,26 @@ Those spans are now visible as auxiliary proposal-like candidates even when the 
 An additional offline revision simulation is now in place on top of those auxiliary proposals. This is still heuristic and should not be read as a solved proposal mechanism, but it does produce non-trivial movement:
 
 - conflict matched-anchor wins in `3/8` families;
-- conflict revise-gain wins in `4/8` families;
-- mean conflict-minus-stable revise-gain gap is `+0.3750`;
-- mean conflict-minus-stable retire-delta gap is `-0.3750`.
+- conflict revise-gain wins in `3/8` families;
+- mean conflict-minus-stable revise-gain gap is `+0.2500`;
+- mean conflict-minus-stable retire-delta gap is `-0.1250`.
+
+The auxiliary matcher is now one-to-one between hint spans and anchors. That reduced the earlier overmatching problem on some stable prompts, especially `quantifier_stable`.
 
 The most promising current family is `api_framework`:
 
 - stable matched anchors: `1`
-- conflict matched anchors: `4`
+- conflict matched anchors: `2`
 - stable revise gain: `0`
 - conflict revise gain: `2`
 
 That is the first useful sign that future-hint proposals can begin to push the revision controller toward `revise` in a family where the base detector was previously weak.
 
-The weakest current rescue family is still `quantifier`. There, the auxiliary path surfaces `a witness`, but the simulated revision effect is not yet stronger than the stable control. So the current bottleneck has shifted from hint extraction to arbiter/matching calibration.
+The weakest current rescue family is still `quantifier`. There, the auxiliary path now behaves more symmetrically:
+
+- stable matched anchors: `1`
+- conflict matched anchors: `1`
+- stable revise gain: `1`
+- conflict revise gain: `1`
+
+So the current bottleneck has shifted from pure overmatching to **arbiter calibration**. The hint `a witness` is present, but the revision controller still does not treat it as stronger than the stable control.

@@ -15,6 +15,7 @@ from src.model.future_span_hints import (
     is_informative_hint_text,
     summarize_auxiliary_proposals,
 )
+from src.model.anchor_types import AnchorRecord, AnchorState
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from scripts.calibrate_qwen_anchor_thresholds import pairwise_family_metrics, score_configuration
 from scripts.analyze_qwen_span_misses import build_analysis, classify_family
@@ -692,3 +693,55 @@ def test_qwen_overlay_emits_future_hint_batches():
     assert "auxiliary_proposal_batches" in out
     assert "auxiliary_proposal_diagnostics" in out
     assert "auxiliary_revision_diagnostics" in out
+
+
+def test_auxiliary_arbiter_uses_one_to_one_matching():
+    model = _DummyCausalLM()
+    tokenizer = _DummyTokenizer()
+    overlay = QwenAnchorOverlay(base_model=model, cfg=TOY_CONFIG, tokenizer=tokenizer)
+    anchors = [
+        [
+            AnchorRecord(
+                id=1,
+                start_idx=0,
+                end_idx=1,
+                repr=torch.ones(4),
+                score=0.8,
+                state=AnchorState.CANDIDATE,
+                support=0.8,
+                contradiction_pressure=0.8,
+                viability=0.2,
+                ttl=4.0,
+                descendant_mass=0.0,
+                descendant_coherence=0.0,
+            ),
+            AnchorRecord(
+                id=2,
+                start_idx=2,
+                end_idx=3,
+                repr=torch.ones(4),
+                score=0.8,
+                state=AnchorState.CANDIDATE,
+                support=0.8,
+                contradiction_pressure=0.8,
+                viability=0.2,
+                ttl=4.0,
+                descendant_mass=0.0,
+                descendant_coherence=0.0,
+            ),
+        ]
+    ]
+    proposals = [[
+        {
+            "proposal_type": "future_hint_span",
+            "proposal_score": 0.95,
+            "proposal_span": (6, 7),
+            "proposal_root_token": 42,
+            "proposal_text": "hint",
+        }
+    ]]
+
+    arbiter, summaries = overlay._build_auxiliary_arbiter(anchors, proposals)
+
+    assert len(arbiter) == 1
+    assert summaries[0]["matched_anchor_count"] == 1

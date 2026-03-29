@@ -227,9 +227,8 @@ class QwenAnchorOverlay(nn.Module):
             matches = 0
             alt_prob_sum = 0.0
             score_sum = 0.0
+            candidate_edges: list[tuple[float, AnchorRecord, dict[str, Any]]] = []
             for anchor in batch_anchors:
-                best_match: dict[str, Any] | None = None
-                best_gate = 0.0
                 for proposal in proposals:
                     start, end = proposal["proposal_span"]
                     if start <= int(anchor.end_idx):
@@ -240,21 +239,29 @@ class QwenAnchorOverlay(nn.Module):
                     pressure = float(anchor.contradiction_pressure)
                     viability = float(anchor.viability)
                     gate = proposal_score * distance_penalty * (0.25 + 0.75 * pressure) * (1.10 - 0.60 * viability)
-                    if gate > best_gate:
-                        best_gate = gate
-                        best_match = proposal
-                if best_match is None or best_gate <= 0.05:
+                    if gate <= 0.08:
+                        continue
+                    candidate_edges.append((gate, anchor, proposal))
+
+            candidate_edges.sort(key=lambda item: item[0], reverse=True)
+            used_anchor_ids: set[int] = set()
+            used_proposal_spans: set[tuple[int, int]] = set()
+            for gate, anchor, best_match in candidate_edges:
+                proposal_span = tuple(int(x) for x in best_match["proposal_span"])
+                if anchor.id in used_anchor_ids or proposal_span in used_proposal_spans:
                     continue
-                alt_prob = max(0.0, min(0.95, best_gate))
+                used_anchor_ids.add(anchor.id)
+                used_proposal_spans.add(proposal_span)
+                alt_prob = max(0.0, min(0.95, gate))
                 arbiter[anchor.id] = {
                     "prefer_current_prob": 1.0 - alt_prob,
                     "prefer_alt_prob": alt_prob,
                     "proposal_score": float(best_match.get("proposal_score", 0.0)),
                     "proposal_root_token": best_match.get("proposal_root_token"),
                     "proposal_type": best_match.get("proposal_type", "future_hint_span"),
-                    "proposal_span": best_match.get("proposal_span"),
+                    "proposal_span": proposal_span,
                     "proposal_text": best_match.get("proposal_text"),
-                    "distance_from_anchor": int(best_match["proposal_span"][0]) - int(anchor.end_idx),
+                    "distance_from_anchor": int(proposal_span[0]) - int(anchor.end_idx),
                 }
                 matches += 1
                 alt_prob_sum += alt_prob
