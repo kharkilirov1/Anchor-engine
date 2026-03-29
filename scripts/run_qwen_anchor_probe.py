@@ -22,6 +22,7 @@ from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 def collect_case_result(
     overlay: QwenAnchorOverlay,
     case_name: str,
+    case_family: str,
     case_description: str,
     case_prompt: str,
     expected_mode: str,
@@ -32,6 +33,7 @@ def collect_case_result(
     proposal_diag = out["proposal_diagnostics"]
     return {
         "name": case_name,
+        "family": case_family,
         "description": case_description,
         "expected_mode": expected_mode,
         "tokens": int(batch["input_ids"].numel()),
@@ -104,13 +106,13 @@ def build_markdown_report(
             "",
             "## Case table",
             "",
-            "| Case | Expected | Tokens | Active | Pressure | Viability | Dead ends | Proposals |",
-            "|---|---|---:|---:|---:|---:|---:|---:|",
+            "| Family | Case | Expected | Tokens | Active | Pressure | Viability | Dead ends | Proposals |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for item in results:
         lines.append(
-            "| {name} | {expected_mode} | {tokens} | {num_active} | {mean_contradiction_pressure:.4f} | "
+            "| {family} | {name} | {expected_mode} | {tokens} | {num_active} | {mean_contradiction_pressure:.4f} | "
             "{mean_viability:.4f} | {dead_end_count} | {proposal_count} |".format(**item)
         )
     lines.extend(["", "## Interpretation", ""])
@@ -195,6 +197,7 @@ def main() -> None:
         result = collect_case_result(
             overlay=overlay,
             case_name=case.name,
+            case_family=case.family,
             case_description=case.description,
             case_prompt=case.prompt,
             expected_mode=case.expected_mode,
@@ -202,6 +205,7 @@ def main() -> None:
         )
         results.append(result)
         print(f"--- {case.name} ---")
+        print(f"family={case.family}")
         print(f"description={case.description}")
         print(f"expected_mode={case.expected_mode}")
         print(f"tokens={result['tokens']}")

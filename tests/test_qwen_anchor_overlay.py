@@ -5,6 +5,7 @@ from dataclasses import replace
 import torch
 import torch.nn as nn
 
+from src.data.qwen_probe_cases import make_qwen_probe_cases
 from src.model.config import TOY_CONFIG
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from scripts.run_qwen_anchor_probe import build_markdown_report, summarize_results
@@ -93,6 +94,7 @@ def test_qwen_probe_summary_and_report_include_gaps():
     results = [
         {
             "name": "stable_case",
+            "family": "toy",
             "description": "stable",
             "expected_mode": "stable",
             "tokens": 10,
@@ -104,6 +106,7 @@ def test_qwen_probe_summary_and_report_include_gaps():
         },
         {
             "name": "conflict_case",
+            "family": "toy",
             "description": "conflict",
             "expected_mode": "conflict",
             "tokens": 12,
@@ -128,3 +131,16 @@ def test_qwen_probe_summary_and_report_include_gaps():
     assert summary["pressure_gap_conflict_minus_stable"] > 0
     assert "Qwen Anchor Probe Report" in report
     assert "conflict_case" in report
+
+
+def test_qwen_probe_cases_are_balanced_by_family():
+    cases = make_qwen_probe_cases()
+
+    assert len(cases) >= 12
+
+    by_family: dict[str, set[str]] = {}
+    for case in cases:
+        by_family.setdefault(case.family, set()).add(case.expected_mode)
+
+    assert by_family
+    assert all(modes == {"stable", "conflict"} for modes in by_family.values())
