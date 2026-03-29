@@ -157,3 +157,12 @@ The weakest current rescue family is still `quantifier`. There, the auxiliary pa
 - conflict mean alt prob: `0.2084`
 
 So the current bottleneck is now more specifically **arbiter calibration on semantically subtle rescue cases**. The hint `a witness` is present, but the revision controller still does not treat it as stronger than the stable control span.
+
+The first constrained base-vs-anchor rerank check has also now been run on the two current rescue families (`api_framework`, `quantifier`). This is not free generation; it is a two-candidate continuation comparison on top of Qwen. The current result is negative:
+
+- rescue subset size: `4` cases
+- base accuracy: `1/4`
+- anchor-assisted rerank accuracy: `1/4`
+- rescued cases: `none`
+
+So, at least in this first practical compare, the current anchor-side reranking does **not** yet beat the base model. That does not kill the diagnostic work, but it does mean the system has not yet crossed the line from interesting signal extraction into useful generation control.
