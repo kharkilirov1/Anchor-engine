@@ -169,7 +169,7 @@ def build_auxiliary_future_proposals(
                 "proposal_type": "future_hint_span",
                 "proposal_score": float(hint["mean_score"]),
                 "proposal_span": (start, end),
-                "proposal_root_token": span_ids[0] if span_ids else None,
+                "proposal_root_token": span_ids[-1] if span_ids else None,
                 "proposal_text": decode_span_text(tokenizer, span_ids),
                 "repr": span_hidden.mean(dim=0).detach(),
             }

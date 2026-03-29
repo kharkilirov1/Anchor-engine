@@ -233,13 +233,8 @@ class QwenAnchorOverlay(nn.Module):
                     start, end = proposal["proposal_span"]
                     if start <= int(anchor.end_idx):
                         continue
-                    distance = max(1, int(start) - int(anchor.end_idx))
-                    distance_penalty = 1.0 / float(distance)
-                    proposal_score = float(proposal.get("proposal_score", 0.0))
-                    pressure = float(anchor.contradiction_pressure)
-                    viability = float(anchor.viability)
-                    gate = proposal_score * distance_penalty * (0.25 + 0.75 * pressure) * (1.10 - 0.60 * viability)
-                    if gate <= 0.08:
+                    gate = self._auxiliary_match_gate(anchor=anchor, proposal=proposal)
+                    if gate <= 0.20:
                         continue
                     candidate_edges.append((gate, anchor, proposal))
 
@@ -274,6 +269,18 @@ class QwenAnchorOverlay(nn.Module):
                 }
             )
         return arbiter, batch_summaries
+
+    @staticmethod
+    def _auxiliary_match_gate(anchor: AnchorRecord, proposal: dict[str, Any]) -> float:
+        start = int(proposal["proposal_span"][0])
+        distance = max(1, start - int(anchor.end_idx))
+        distance_penalty = 1.0 / float(distance) ** 0.5
+        proposal_score = float(proposal.get("proposal_score", 0.0))
+        pressure = float(anchor.contradiction_pressure)
+        viability = float(anchor.viability)
+        pressure_factor = 0.20 + 0.80 * pressure
+        viability_factor = 0.55 + 0.45 * viability
+        return proposal_score * distance_penalty * pressure_factor * viability_factor
 
     @staticmethod
     def _summarize_auxiliary_revision(

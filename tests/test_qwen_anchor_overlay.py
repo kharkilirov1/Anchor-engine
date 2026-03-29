@@ -416,6 +416,7 @@ def test_build_auxiliary_future_proposals_averages_hidden_span():
 
     assert len(proposals) == 1
     assert proposals[0]["proposal_span"] == (0, 1)
+    assert proposals[0]["proposal_root_token"] == 2
     assert torch.allclose(proposals[0]["repr"], torch.tensor([2.0, 3.0]))
 
 
@@ -745,3 +746,34 @@ def test_auxiliary_arbiter_uses_one_to_one_matching():
 
     assert len(arbiter) == 1
     assert summaries[0]["matched_anchor_count"] == 1
+
+
+def test_auxiliary_match_gate_uses_sublinear_distance_penalty():
+    anchor = AnchorRecord(
+        id=1,
+        start_idx=0,
+        end_idx=4,
+        repr=torch.ones(4),
+        score=0.8,
+        state=AnchorState.CANDIDATE,
+        support=0.8,
+        contradiction_pressure=0.8,
+        viability=0.5,
+        ttl=4.0,
+        descendant_mass=0.0,
+        descendant_coherence=0.0,
+    )
+    near_proposal = {
+        "proposal_span": (6, 6),
+        "proposal_score": 0.9,
+    }
+    far_proposal = {
+        "proposal_span": (20, 20),
+        "proposal_score": 0.9,
+    }
+
+    near_gate = QwenAnchorOverlay._auxiliary_match_gate(anchor, near_proposal)
+    far_gate = QwenAnchorOverlay._auxiliary_match_gate(anchor, far_proposal)
+
+    assert near_gate > far_gate
+    assert far_gate > 0.1

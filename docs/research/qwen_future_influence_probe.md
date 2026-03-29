@@ -1,6 +1,6 @@
 # Qwen Future Influence Probe
 
-Date: 2026-03-29 11:15 UTC
+Date: 2026-03-29 13:50 UTC
 Model: `Qwen/Qwen2.5-1.5B`
 Device: `cpu`
 Max length: `192`
@@ -19,9 +19,9 @@ Seed: `7`
 - Conflict minus stable future-span overlap gap: `0.0417`
 - Conflict minus stable auxiliary proposal-count gap: `0.6250`
 - Conflict minus stable auxiliary proposal-score gap: `0.0352`
-- Conflict minus stable auxiliary revision-match gap: `0.2500`
-- Conflict minus stable auxiliary revise-gain gap: `0.2500`
-- Conflict minus stable auxiliary retire-delta gap: `-0.1250`
+- Conflict minus stable auxiliary revision-match gap: `0.3750`
+- Conflict minus stable auxiliary revise-gain gap: `0.5000`
+- Conflict minus stable auxiliary retire-delta gap: `-0.3750`
 
 ## Case table
 
@@ -29,18 +29,18 @@ Seed: `7`
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | quantifier | quantifier_stable | stable | 27 | 3 | 1 | 1 | +1 | 0.3867 | 0.3617 | 0.5000 | 1.0000 | 4.2500 |
 | quantifier | quantifier_conflict | conflict | 32 | 5 | 1 | 1 | +1 | 0.3555 | 0.4867 | 0.5000 | 1.0000 | 5.2188 |
-| proof_mode | proof_mode_stable | stable | 31 | 2 | 3 | 2 | +1 | 0.2637 | 0.0000 | 0.0000 | 1.0000 | 3.2031 |
+| proof_mode | proof_mode_stable | stable | 31 | 2 | 3 | 2 | +2 | 0.2637 | 0.0000 | 0.0000 | 1.0000 | 3.2031 |
 | proof_mode | proof_mode_conflict | conflict | 27 | 2 | 3 | 2 | +2 | 0.3984 | 0.4336 | 0.2500 | 1.0000 | 3.6562 |
 | induction | induction_stable | stable | 29 | 3 | 1 | 1 | +1 | 0.3105 | 0.2669 | 0.3333 | 1.0000 | 3.1875 |
-| induction | induction_conflict | conflict | 34 | 1 | 3 | 2 | +1 | 0.2988 | 0.8047 | 0.2500 | 1.0000 | 3.9062 |
-| api_framework | api_framework_stable | stable | 30 | 1 | 1 | 1 | +0 | 0.3145 | 0.0000 | 0.0000 | 1.0000 | 3.2656 |
+| induction | induction_conflict | conflict | 34 | 1 | 3 | 2 | +2 | 0.2988 | 0.8047 | 0.2500 | 1.0000 | 3.9062 |
+| api_framework | api_framework_stable | stable | 30 | 1 | 1 | 0 | +0 | 0.3145 | 0.0000 | 0.0000 | 1.0000 | 3.2656 |
 | api_framework | api_framework_conflict | conflict | 30 | 1 | 2 | 2 | +2 | 0.3730 | 0.8398 | 0.2500 | 1.0000 | 5.1875 |
 | instruction_constraints | instruction_constraints_stable | stable | 28 | 3 | 2 | 2 | +1 | 0.4355 | 0.5221 | 0.2500 | 1.0000 | 4.4062 |
-| instruction_constraints | instruction_constraints_conflict | conflict | 36 | 2 | 3 | 2 | +1 | 0.3477 | 0.2012 | 0.2500 | 1.0000 | 5.7812 |
+| instruction_constraints | instruction_constraints_conflict | conflict | 36 | 2 | 3 | 2 | +2 | 0.3477 | 0.2012 | 0.2500 | 1.0000 | 5.7812 |
 | entity_property | entity_property_stable | stable | 32 | 1 | 2 | 1 | +1 | 0.2969 | 0.0000 | 0.0000 | 1.0000 | 3.7188 |
 | entity_property | entity_property_conflict | conflict | 33 | 1 | 3 | 2 | +1 | 0.3281 | 0.9102 | 0.2500 | 1.0000 | 3.5938 |
 | legal_scope | legal_scope_stable | stable | 28 | 3 | 2 | 2 | +2 | 0.4316 | 0.3216 | 0.2500 | 1.0000 | 4.3750 |
-| legal_scope | legal_scope_conflict | conflict | 37 | 2 | 1 | 1 | +0 | 0.2295 | 0.0000 | 0.0000 | 1.0000 | 4.9062 |
+| legal_scope | legal_scope_conflict | conflict | 37 | 2 | 1 | 1 | +1 | 0.2295 | 0.0000 | 0.0000 | 1.0000 | 4.9062 |
 | units | units_stable | stable | 31 | 2 | 2 | 2 | +1 | 0.3125 | 0.2109 | 0.3333 | 1.0000 | 3.9219 |
 | units | units_conflict | conflict | 46 | 3 | 3 | 2 | +2 | 0.2207 | 0.0951 | 0.2500 | 1.0000 | 3.6094 |
 
@@ -171,7 +171,7 @@ Seed: `7`
   - `22-24` | mean `0.8750` | text ` a universal mathematical`
 - auxiliary proposals:
   - `22-24` | score `0.8750` | text ` a universal mathematical`
-- auxiliary revision: matches `1`, mean alt prob `0.6366`, revise gain `+1`, retire delta `-1`
+- auxiliary revision: matches `1`, mean alt prob `0.5442`, revise gain `+1`, retire delta `-1`
 
 ### quantifier_conflict
 - span `24-25` | mean `0.9531` | max `1.0000` | text ` a witness`
@@ -184,7 +184,7 @@ Seed: `7`
   - `24-25` | mean `0.9531` | text ` a witness`
 - auxiliary proposals:
   - `24-25` | score `0.9531` | text ` a witness`
-- auxiliary revision: matches `1`, mean alt prob `0.0823`, revise gain `+1`, retire delta `+0`
+- auxiliary revision: matches `1`, mean alt prob `0.2084`, revise gain `+1`, retire delta `+0`
 
 ### proof_mode_stable
 - span `19-19` | mean `1.0000` | max `1.0000` | text ` a`
@@ -201,7 +201,7 @@ Seed: `7`
   - `28-28` | score `0.8633` | text `iction`
   - `22-22` | score `0.8594` | text ` preserves`
   - `14-14` | score `0.8516` | text ` claim`
-- auxiliary revision: matches `2`, mean alt prob `0.1564`, revise gain `+1`, retire delta `-1`
+- auxiliary revision: matches `2`, mean alt prob `0.2634`, revise gain `+2`, retire delta `-2`
 
 ### proof_mode_conflict
 - span `21-21` | mean `1.0000` | max `1.0000` | text ` proof`
@@ -217,7 +217,7 @@ Seed: `7`
   - `21-21` | score `1.0000` | text ` proof`
   - `10-10` | score `0.8945` | text ` Half`
   - `16-16` | score `0.8281` | text ` starts`
-- auxiliary revision: matches `2`, mean alt prob `0.2371`, revise gain `+2`, retire delta `-1`
+- auxiliary revision: matches `2`, mean alt prob `0.3496`, revise gain `+2`, retire delta `-1`
 
 ### induction_stable
 - span `25-26` | mean `0.9609` | max `1.0000` | text ` in induction`
@@ -229,7 +229,7 @@ Seed: `7`
   - `25-26` | mean `0.9609` | text ` in induction`
 - auxiliary proposals:
   - `25-26` | score `0.9609` | text ` in induction`
-- auxiliary revision: matches `1`, mean alt prob `0.6983`, revise gain `+1`, retire delta `-1`
+- auxiliary revision: matches `1`, mean alt prob `0.5983`, revise gain `+1`, retire delta `-1`
 
 ### induction_conflict
 - span `26-27` | mean `0.9961` | max `1.0000` | text ` the induction`
@@ -246,7 +246,7 @@ Seed: `7`
   - `26-27` | score `0.9961` | text ` the induction`
   - `22-23` | score `0.8359` | text ` arbitrary example`
   - `18-18` | score `0.7500` | text ` starts`
-- auxiliary revision: matches `2`, mean alt prob `0.1898`, revise gain `+1`, retire delta `-1`
+- auxiliary revision: matches `2`, mean alt prob `0.2964`, revise gain `+2`, retire delta `-2`
 
 ### api_framework_stable
 - span `20-20` | mean `1.0000` | max `1.0000` | text `.`
@@ -259,7 +259,7 @@ Seed: `7`
   - `22-23` | mean `0.8906` | text ` the technical`
 - auxiliary proposals:
   - `22-23` | score `0.8906` | text ` the technical`
-- auxiliary revision: matches `1`, mean alt prob `0.0811`, revise gain `+0`, retire delta `+0`
+- auxiliary revision: matches `0`, mean alt prob `0.0000`, revise gain `+0`, retire delta `+0`
 
 ### api_framework_conflict
 - span `19-22` | mean `0.8828` | max `1.0000` | text ` a synchronous Django view`
@@ -274,7 +274,7 @@ Seed: `7`
 - auxiliary proposals:
   - `19-22` | score `0.8828` | text ` a synchronous Django view`
   - `13-15` | score `0.8203` | text ` the text starts`
-- auxiliary revision: matches `2`, mean alt prob `0.4701`, revise gain `+2`, retire delta `-2`
+- auxiliary revision: matches `2`, mean alt prob `0.4567`, revise gain `+2`, retire delta `-2`
 
 ### instruction_constraints_stable
 - span `17-17` | mean `0.9492` | max `0.9492` | text `.`
@@ -289,7 +289,7 @@ Seed: `7`
 - auxiliary proposals:
   - `21-25` | score `0.9062` | text ` the answer while preserving those`
   - `14-15` | score `0.8789` | text ` and avoid`
-- auxiliary revision: matches `2`, mean alt prob `0.1724`, revise gain `+1`, retire delta `+0`
+- auxiliary revision: matches `2`, mean alt prob `0.2906`, revise gain `+1`, retire delta `+0`
 
 ### instruction_constraints_conflict
 - span `19-21` | mean `0.8633` | max `0.9336` | text ` the text starts`
@@ -306,7 +306,7 @@ Seed: `7`
   - `19-21` | score `0.8633` | text ` the text starts`
   - `33-34` | score `0.8633` | text ` the planning`
   - `28-29` | score `0.8594` | text ` with creative`
-- auxiliary revision: matches `2`, mean alt prob `0.3063`, revise gain `+1`, retire delta `+0`
+- auxiliary revision: matches `2`, mean alt prob `0.3610`, revise gain `+2`, retire delta `-1`
 
 ### entity_property_stable
 - span `28-29` | mean `0.9609` | max `1.0000` | text ` that allergy`
@@ -320,7 +320,7 @@ Seed: `7`
 - auxiliary proposals:
   - `28-29` | score `0.9609` | text ` that allergy`
   - `23-26` | score `0.8203` | text ` the clinical note while`
-- auxiliary revision: matches `1`, mean alt prob `0.7023`, revise gain `+1`, retire delta `-1`
+- auxiliary revision: matches `1`, mean alt prob `0.5989`, revise gain `+1`, retire delta `-1`
 
 ### entity_property_conflict
 - span `25-25` | mean `1.0000` | max `1.0000` | text `-line`
@@ -337,7 +337,7 @@ Seed: `7`
   - `25-25` | score `1.0000` | text `-line`
   - `22-23` | score `0.9336` | text ` the routine`
   - `29-30` | score `0.9336` | text ` the clinical`
-- auxiliary revision: matches `2`, mean alt prob `0.4636`, revise gain `+1`, retire delta `-1`
+- auxiliary revision: matches `2`, mean alt prob `0.4695`, revise gain `+1`, retire delta `-1`
 
 ### legal_scope_stable
 - span `18-18` | mean `0.9648` | max `0.9648` | text `.`
@@ -352,7 +352,7 @@ Seed: `7`
 - auxiliary proposals:
   - `14-16` | score `0.8711` | text ` for non-commercial`
   - `20-24` | score `0.8672` | text ` the clause while preserving those`
-- auxiliary revision: matches `2`, mean alt prob `0.1686`, revise gain `+2`, retire delta `+0`
+- auxiliary revision: matches `2`, mean alt prob `0.2759`, revise gain `+2`, retire delta `+0`
 
 ### legal_scope_conflict
 - span `29-29` | mean `1.0000` | max `1.0000` | text ` commercial`
@@ -362,7 +362,7 @@ Seed: `7`
   - `29-29` | mean `1.0000` | text ` commercial`
 - auxiliary proposals:
   - `29-29` | score `1.0000` | text ` commercial`
-- auxiliary revision: matches `1`, mean alt prob `0.0809`, revise gain `+0`, retire delta `+0`
+- auxiliary revision: matches `1`, mean alt prob `0.2075`, revise gain `+1`, retire delta `-1`
 
 ### units_stable
 - span `19-19` | mean `0.8984` | max `0.8984` | text `.`
@@ -376,7 +376,7 @@ Seed: `7`
 - auxiliary proposals:
   - `21-24` | score `0.8398` | text ` the calculation notes while`
   - `26-28` | score `0.8164` | text ` the same unit`
-- auxiliary revision: matches `2`, mean alt prob `0.5674`, revise gain `+1`, retire delta `-1`
+- auxiliary revision: matches `2`, mean alt prob `0.5019`, revise gain `+1`, retire delta `-1`
 
 ### units_conflict
 - span `36-36` | mean `0.9648` | max `0.9648` | text ` meters`
@@ -393,7 +393,7 @@ Seed: `7`
   - `36-36` | score `0.9648` | text ` meters`
   - `32-33` | score `0.9609` | text ` were already`
   - `42-43` | score `0.9414` | text ` the calculation`
-- auxiliary revision: matches `2`, mean alt prob `0.4632`, revise gain `+2`, retire delta `-1`
+- auxiliary revision: matches `2`, mean alt prob `0.4883`, revise gain `+2`, retire delta `-1`
 
 ## Interpretation
 
