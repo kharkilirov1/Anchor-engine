@@ -7,6 +7,7 @@ import torch.nn as nn
 
 from src.model.config import TOY_CONFIG
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
+from scripts.run_qwen_anchor_probe import build_markdown_report, summarize_results
 
 
 class _DummyConfig:
@@ -86,3 +87,44 @@ def test_qwen_anchor_overlay_analyze_texts_uses_tokenizer():
     assert "input_ids" in batch
     assert batch["input_ids"].shape[0] == 2
     assert "anchor_diagnostics" in out
+
+
+def test_qwen_probe_summary_and_report_include_gaps():
+    results = [
+        {
+            "name": "stable_case",
+            "description": "stable",
+            "expected_mode": "stable",
+            "tokens": 10,
+            "num_active": 1,
+            "mean_contradiction_pressure": 0.2,
+            "mean_viability": 0.6,
+            "dead_end_count": 1,
+            "proposal_count": 0,
+        },
+        {
+            "name": "conflict_case",
+            "description": "conflict",
+            "expected_mode": "conflict",
+            "tokens": 12,
+            "num_active": 2,
+            "mean_contradiction_pressure": 0.5,
+            "mean_viability": 0.3,
+            "dead_end_count": 2,
+            "proposal_count": 0,
+        },
+    ]
+
+    summary = summarize_results(results)
+    report = build_markdown_report(
+        model_name="Qwen/Qwen2.5-1.5B",
+        device="cpu",
+        max_length=64,
+        seed=7,
+        results=results,
+        summary=summary,
+    )
+
+    assert summary["pressure_gap_conflict_minus_stable"] > 0
+    assert "Qwen Anchor Probe Report" in report
+    assert "conflict_case" in report

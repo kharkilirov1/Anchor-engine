@@ -91,16 +91,18 @@ class QwenAnchorOverlay(nn.Module):
             return_dict=True,
         )
         hidden = outputs.hidden_states[-1]
-        history = torch.roll(hidden.detach(), shifts=1, dims=1)
-        history[:, 0] = hidden[:, 0].detach()
+        anchor_dtype = self.anchor_detector.prior_head.weight.dtype
+        anchor_hidden = hidden if hidden.dtype == anchor_dtype else hidden.to(anchor_dtype)
+        history = torch.roll(anchor_hidden.detach(), shifts=1, dims=1)
+        history[:, 0] = anchor_hidden[:, 0].detach()
 
-        detector_out = self.anchor_detector(hidden, history, attention_mask=attention_mask)
+        detector_out = self.anchor_detector(anchor_hidden, history, attention_mask=attention_mask)
         anchors = self.anchor_memory.add_candidates(detector_out["candidates"])
         anchors = self.anchor_memory.update_support(anchors, detector_out["scores"])
         anchors = self.anchor_memory.update_ttl(anchors)
 
         contradiction_out = self.contradiction_monitor(
-            hidden,
+            anchor_hidden,
             anchors,
             aux={"input_ids": input_ids},
         )
