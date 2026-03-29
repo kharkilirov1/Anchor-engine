@@ -12,6 +12,7 @@ from src.model.anchor_monitor import ContradictionMonitor
 from src.model.anchor_revision import RevisionController
 from src.model.anchor_viability import ViabilityTracker
 from src.model.config import ModelConfig, TOY_CONFIG
+from src.model.future_influence import FutureInfluenceScorer
 
 
 class QwenAnchorOverlay(nn.Module):
@@ -51,6 +52,7 @@ class QwenAnchorOverlay(nn.Module):
         self.contradiction_monitor = ContradictionMonitor(anchor_cfg)
         self.viability_tracker = ViabilityTracker(anchor_cfg)
         self.revision_controller = RevisionController(anchor_cfg)
+        self.future_influence_scorer = FutureInfluenceScorer()
 
     @classmethod
     def from_pretrained(
@@ -184,4 +186,32 @@ class QwenAnchorOverlay(nn.Module):
                 attention_mask=batch.get("attention_mask"),
             )
             out["hidden"] = hidden
+        return out, batch
+
+    def analyze_texts_with_future_influence(
+        self,
+        texts: list[str],
+        max_length: int = 256,
+        future_window: int = 16,
+    ) -> tuple[dict[str, Any], dict[str, torch.Tensor]]:
+        if self.tokenizer is None:
+            raise ValueError("tokenizer is required for analyze_texts_with_future_influence")
+
+        encoded = self.tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt",
+        )
+        device = next(self.parameters()).device
+        batch = {key: value.to(device) for key, value in encoded.items()}
+        out = self(**batch)
+        out["future_influence"] = self.future_influence_scorer(
+            hidden=out["hidden"],
+            logits=out["logits"],
+            input_ids=batch["input_ids"],
+            attention_mask=batch.get("attention_mask"),
+            future_window=future_window,
+        )
         return out, batch

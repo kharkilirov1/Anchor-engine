@@ -133,7 +133,32 @@ This phase should answer one important question:
 
 > was the small custom backbone the main bottleneck, or is the anchor idea itself weak?
 
-## Phase 4 — Minimal intervention mode
+## Phase 4 — Better anchor scoring proxies
+
+Only after the basic Qwen overlay is stable.
+
+### Objective
+
+Test scoring methods that sit between:
+
+- cheap local hidden-state delta
+- expensive leave-one-out KL
+
+The first candidate is a future-conditioned gradient scorer:
+
+- compute a short autoregressive future loss window;
+- backpropagate that loss to token positions or hidden states;
+- treat high-gradient positions as candidates for semantically important spans.
+
+### Why this matters
+
+If local delta is too myopic and full KL is too expensive, then future-conditioned attribution may be a practical middle ground.
+
+### Current status
+
+An exploratory future-gradient probe exists, but results are still mixed. The method looks more promising as a position-specific anchor relevance signal than as a single prompt-level scalar.
+
+## Phase 5 — Minimal intervention mode
 
 Only attempt this if Phases 1–3 look meaningful.
 
@@ -151,7 +176,7 @@ Let the anchor engine influence generation in a minimal way, without rewriting Q
 
 Keep intervention small and measurable. Avoid building a full alternate decoding stack too early.
 
-## Phase 5 — Lightweight trainable heads
+## Phase 6 — Lightweight trainable heads
 
 Only if earlier phases are promising.
 
@@ -196,8 +221,9 @@ All of these outcomes are informative.
 1. `src/model/qwen_anchor_overlay.py`
 2. `scripts/run_qwen_anchor_probe.py`
 3. Qwen-vs-ABPT compare report
-4. only then minimal intervention during generation
-5. only then lightweight trainable heads
+4. future-influence / attribution-style scoring experiments
+5. only then minimal intervention during generation
+6. only then lightweight trainable heads
 
 ## Short conclusion
 

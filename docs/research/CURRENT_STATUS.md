@@ -61,3 +61,24 @@ In parallel, the current approved external-test direction is:
 1. attach the anchor engine as an overlay to `Qwen2.5-1.5B`;
 2. run the existing semantic probes on Qwen hidden states;
 3. compare whether anchor diagnostics become more meaningful on a stronger pretrained backbone.
+
+## Qwen overlay update
+
+The Qwen overlay path is now live enough to produce reproducible diagnostics on a real pretrained model.
+
+Current status on `Qwen/Qwen2.5-1.5B`:
+
+- anchor probe suite: `16` paired stable/conflict cases across `8` families
+- threshold calibration: implemented
+- stable/conflict separation: present but still modest
+- proposal path: still inactive
+
+An additional experimental scorer was added as a midpoint between local hidden-state delta and full leave-one-out KL:
+
+- future-gradient influence on a short autoregressive loss window
+
+This scorer does **not** yet cleanly separate stable vs conflict cases by simple prompt-level mean. However, it does show stronger signal at active anchor positions in several conflict prompts. The current honest interpretation is:
+
+- the future-influence idea is worth keeping as an exploratory direction;
+- it is not yet a replacement for the existing anchor diagnostics;
+- the most useful signal may be position-specific span relevance rather than one scalar per prompt.
