@@ -8,6 +8,7 @@ import torch.nn as nn
 from src.data.qwen_probe_cases import make_qwen_probe_cases
 from src.model.config import TOY_CONFIG
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
+from scripts.calibrate_qwen_anchor_thresholds import pairwise_family_metrics, score_configuration
 from scripts.run_qwen_anchor_probe import build_markdown_report, summarize_results
 
 
@@ -124,6 +125,12 @@ def test_qwen_probe_summary_and_report_include_gaps():
         device="cpu",
         max_length=64,
         seed=7,
+        cfg={
+            "anchor_threshold": 0.2,
+            "anchor_revision_threshold": 0.45,
+            "anchor_contradiction_threshold": 0.25,
+            "anchor_dead_end_threshold": 0.4,
+        },
         results=results,
         summary=summary,
     )
@@ -144,3 +151,60 @@ def test_qwen_probe_cases_are_balanced_by_family():
 
     assert by_family
     assert all(modes == {"stable", "conflict"} for modes in by_family.values())
+
+
+def test_qwen_overlay_can_analyze_hidden_batch_directly():
+    model = _DummyCausalLM()
+    tokenizer = _DummyTokenizer()
+    overlay = QwenAnchorOverlay(base_model=model, cfg=TOY_CONFIG, tokenizer=tokenizer)
+
+    input_ids = torch.randint(0, model.config.vocab_size, (1, 8))
+    attention_mask = torch.ones(1, 8, dtype=torch.long)
+    hidden = overlay.extract_hidden_batch(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+    )
+    out = overlay.analyze_hidden_batch(
+        hidden=hidden,
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+    )
+
+    assert "anchor_diagnostics" in out
+    assert "proposal_diagnostics" in out
+
+
+def test_qwen_calibration_scoring_prefers_family_separation():
+    results = [
+        {
+            "name": "alpha_stable",
+            "family": "alpha",
+            "description": "stable",
+            "expected_mode": "stable",
+            "tokens": 10,
+            "num_active": 2,
+            "mean_contradiction_pressure": 0.20,
+            "mean_viability": 0.60,
+            "dead_end_count": 1,
+            "proposal_count": 0,
+        },
+        {
+            "name": "alpha_conflict",
+            "family": "alpha",
+            "description": "conflict",
+            "expected_mode": "conflict",
+            "tokens": 10,
+            "num_active": 2,
+            "mean_contradiction_pressure": 0.55,
+            "mean_viability": 0.30,
+            "dead_end_count": 2,
+            "proposal_count": 0,
+        },
+    ]
+
+    family_metrics = pairwise_family_metrics(results)
+    scored = score_configuration(results)
+
+    assert family_metrics["alpha"]["pressure_win"] is True
+    assert family_metrics["alpha"]["viability_win"] is True
+    assert scored["score"] > 0

@@ -75,6 +75,7 @@ def build_markdown_report(
     device: str,
     max_length: int,
     seed: int,
+    cfg: dict[str, float],
     results: list[dict[str, Any]],
     summary: dict[str, Any],
 ) -> str:
@@ -86,6 +87,10 @@ def build_markdown_report(
         f"Device: `{device}`",
         f"Max length: `{max_length}`",
         f"Seed: `{seed}`",
+        f"anchor_threshold: `{cfg['anchor_threshold']:.2f}`",
+        f"anchor_revision_threshold: `{cfg['anchor_revision_threshold']:.2f}`",
+        f"anchor_contradiction_threshold: `{cfg['anchor_contradiction_threshold']:.2f}`",
+        f"anchor_dead_end_threshold: `{cfg['anchor_dead_end_threshold']:.2f}`",
         "",
         "## Summary",
         "",
@@ -159,6 +164,10 @@ def main() -> None:
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--max_length", type=int, default=256)
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--anchor_threshold", type=float, default=0.20)
+    parser.add_argument("--anchor_revision_threshold", type=float, default=0.45)
+    parser.add_argument("--anchor_contradiction_threshold", type=float, default=0.25)
+    parser.add_argument("--anchor_dead_end_threshold", type=float, default=0.40)
     parser.add_argument(
         "--output_json",
         type=Path,
@@ -174,10 +183,10 @@ def main() -> None:
 
     cfg = replace(
         TOY_CONFIG,
-        anchor_threshold=0.20,
-        anchor_revision_threshold=0.45,
-        anchor_contradiction_threshold=0.25,
-        anchor_dead_end_threshold=0.40,
+        anchor_threshold=args.anchor_threshold,
+        anchor_revision_threshold=args.anchor_revision_threshold,
+        anchor_contradiction_threshold=args.anchor_contradiction_threshold,
+        anchor_dead_end_threshold=args.anchor_dead_end_threshold,
     )
     overlay = QwenAnchorOverlay.from_pretrained(
         model_name=args.model,
@@ -223,6 +232,12 @@ def main() -> None:
         "device": args.device,
         "max_length": args.max_length,
         "seed": args.seed,
+        "config": {
+            "anchor_threshold": args.anchor_threshold,
+            "anchor_revision_threshold": args.anchor_revision_threshold,
+            "anchor_contradiction_threshold": args.anchor_contradiction_threshold,
+            "anchor_dead_end_threshold": args.anchor_dead_end_threshold,
+        },
         "results": results,
         "summary": summary,
     }
@@ -231,6 +246,7 @@ def main() -> None:
         device=args.device,
         max_length=args.max_length,
         seed=args.seed,
+        cfg=payload["config"],
         results=results,
         summary=summary,
     )

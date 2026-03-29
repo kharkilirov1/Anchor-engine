@@ -91,6 +91,21 @@ class QwenAnchorOverlay(nn.Module):
             return_dict=True,
         )
         hidden = outputs.hidden_states[-1]
+        anchor_out = self.analyze_hidden_batch(
+            hidden=hidden,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+        anchor_out["logits"] = outputs.logits
+        anchor_out["hidden"] = hidden
+        return anchor_out
+
+    def analyze_hidden_batch(
+        self,
+        hidden: torch.Tensor,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+    ) -> dict[str, Any]:
         anchor_dtype = self.anchor_detector.prior_head.weight.dtype
         anchor_hidden = hidden if hidden.dtype == anchor_dtype else hidden.to(anchor_dtype)
         history = torch.roll(anchor_hidden.detach(), shifts=1, dims=1)
@@ -114,8 +129,6 @@ class QwenAnchorOverlay(nn.Module):
         diagnostics["revision_event_count"] = len(revision_events)
 
         return {
-            "logits": outputs.logits,
-            "hidden": hidden,
             "anchor_candidates": detector_out["candidates"],
             "active_anchors": active_anchors,
             "anchor_states": [[anchor.state for anchor in batch] for batch in anchors],
@@ -132,6 +145,19 @@ class QwenAnchorOverlay(nn.Module):
                 "mean_blend_ratio": 0.0,
             },
         }
+
+    def extract_hidden_batch(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        outputs = self.base_model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        return outputs.hidden_states[-1]
 
     def analyze_texts(
         self,
@@ -151,5 +177,11 @@ class QwenAnchorOverlay(nn.Module):
         device = next(self.parameters()).device
         batch = {key: value.to(device) for key, value in encoded.items()}
         with torch.no_grad():
-            out = self(**batch)
+            hidden = self.extract_hidden_batch(**batch)
+            out = self.analyze_hidden_batch(
+                hidden=hidden,
+                input_ids=batch["input_ids"],
+                attention_mask=batch.get("attention_mask"),
+            )
+            out["hidden"] = hidden
         return out, batch
