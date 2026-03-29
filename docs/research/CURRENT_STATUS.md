@@ -158,11 +158,31 @@ The weakest current rescue family is still `quantifier`. There, the auxiliary pa
 
 So the current bottleneck is now more specifically **arbiter calibration on semantically subtle rescue cases**. The hint `a witness` is present, but the revision controller still does not treat it as stronger than the stable control span.
 
-The first constrained base-vs-anchor rerank check has also now been run on the two current rescue families (`api_framework`, `quantifier`). This is not free generation; it is a two-candidate continuation comparison on top of Qwen. The current result is negative:
+The first constrained base-vs-anchor rerank check has also now been run on top of Qwen. This is not free generation; it is a two-candidate continuation comparison. On the full 16-case suite, the result is only weakly positive:
+
+- full rerank suite size: `16` cases
+- base accuracy: `7/16`
+- anchor-assisted rerank accuracy: `8/16`
+- rescued cases: `proof_mode_stable`
+
+So there is now at least a small end-to-end sign that the anchor-side signal can sometimes change ranking in the intended direction. But it is still marginal and not enough to claim a useful generation improvement.
+
+On the more demanding rescue subset (`api_framework`, `quantifier`), the same rerank benchmark is still negative:
 
 - rescue subset size: `4` cases
 - base accuracy: `1/4`
 - anchor-assisted rerank accuracy: `1/4`
 - rescued cases: `none`
 
-So, at least in this first practical compare, the current anchor-side reranking does **not** yet beat the base model. That does not kill the diagnostic work, but it does mean the system has not yet crossed the line from interesting signal extraction into useful generation control.
+So the current reranking layer does **not** yet beat the base model where we most wanted it to.
+
+A first token-level intervention has now also been tested. The overlay can generate with a simple anchor-guided logits bias: when the current hidden state drifts away from active anchors, it adds a normalized LM-head projection of those anchors back into the next-token logits. This is the first direct attempt to turn the diagnostics into generation control.
+
+On the same rescue subset (`api_framework`, `quantifier`, stable + conflict), the first result is again negative:
+
+- greedy generation subset size: `4` cases
+- base mean lexical consistency score: `1.0000`
+- anchor-biased mean lexical consistency score: `1.0000`
+- changed generations: `0`
+
+In practice, the generated continuations were identical between base and anchor-biased decoding on that subset, even when the bias path was active on some steps. So the current intervention exists, but it is still too weak or too misaligned to change actual token selection in the tested prompts.

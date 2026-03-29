@@ -5,6 +5,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from src.model.anchor_detector import AnchorDetector
 from src.model.anchor_memory import AnchorMemory
@@ -14,6 +15,7 @@ from src.model.anchor_revision import RevisionController
 from src.model.anchor_viability import ViabilityTracker
 from src.model.config import ModelConfig, TOY_CONFIG
 from src.model.future_influence import FutureInfluenceScorer
+from src.model.qwen_generation_bias import compute_anchor_logits_bias
 from src.model.future_span_hints import (
     build_auxiliary_future_proposals,
     build_future_hint_candidates,
@@ -450,3 +452,109 @@ class QwenAnchorOverlay(nn.Module):
         )
         out["auxiliary_active_anchors"] = self.anchor_memory.get_active_anchors(auxiliary_revised_anchors)
         return out, batch
+
+    def generate_with_anchor_bias(
+        self,
+        prompt: str,
+        max_new_tokens: int = 24,
+        max_length: int = 256,
+        conflict_threshold: float = 0.55,
+        bias_scale: float = 1.50,
+        temperature: float = 1.0,
+        greedy: bool = True,
+    ) -> dict[str, Any]:
+        if self.tokenizer is None:
+            raise ValueError("tokenizer is required for generate_with_anchor_bias")
+
+        encoded = self.tokenizer(
+            [prompt],
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt",
+        )
+        device = next(self.parameters()).device
+        input_ids = encoded["input_ids"].to(device)
+        attention_mask = encoded["attention_mask"].to(device)
+        generated = input_ids
+        generated_mask = attention_mask
+        step_records: list[dict[str, Any]] = []
+        output_projection = self.base_model.get_output_embeddings()
+        if output_projection is None:
+            raise ValueError("base model must expose output embeddings")
+
+        for _ in range(max_new_tokens):
+            outputs = self.base_model(
+                input_ids=generated,
+                attention_mask=generated_mask,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            hidden = outputs.hidden_states[-1]
+            next_hidden = hidden[:, -1, :]
+            next_logits = outputs.logits[:, -1, :]
+
+            detector_out, anchors, contradiction_out, viability_out = self._prepare_anchor_state(
+                hidden=hidden,
+                input_ids=generated,
+                attention_mask=generated_mask,
+            )
+            revised_anchors, revision_events, diagnostics = self._apply_revision_path(
+                anchors=self._clone_anchor_batches(anchors),
+                viability_out=viability_out,
+                arbiter={},
+            )
+            active_anchors = self.anchor_memory.get_active_anchors(revised_anchors)[0]
+            anchor_bias, bias_diag = compute_anchor_logits_bias(
+                last_hidden=next_hidden,
+                active_anchors=active_anchors,
+                output_projection=output_projection,
+                conflict_threshold=conflict_threshold,
+                bias_scale=bias_scale,
+            )
+
+            adjusted_logits = next_logits + anchor_bias.to(next_logits.dtype)
+            if temperature != 1.0:
+                adjusted_logits = adjusted_logits / max(float(temperature), 1e-6)
+
+            if greedy:
+                next_token = torch.argmax(adjusted_logits, dim=-1, keepdim=True)
+            else:
+                probs = F.softmax(adjusted_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+
+            generated = torch.cat([generated, next_token], dim=1)
+            generated_mask = torch.cat(
+                [
+                    generated_mask,
+                    torch.ones((generated_mask.size(0), 1), device=device, dtype=generated_mask.dtype),
+                ],
+                dim=1,
+            )
+            step_records.append(
+                {
+                    "token_id": int(next_token.item()),
+                    "token_text": self.tokenizer.decode([int(next_token.item())], skip_special_tokens=False),
+                    "num_active": int(diagnostics["num_active"]),
+                    "mean_contradiction_pressure": float(diagnostics["mean_contradiction_pressure"]),
+                    "mean_viability": float(diagnostics["mean_viability"]),
+                    "dead_end_count": int(diagnostics["dead_end_count"]),
+                    "revision_event_count": len(revision_events),
+                    "bias_nonzero_anchors": len(bias_diag),
+                    "bias_gate_sum": float(sum(item["gate"] for item in bias_diag)),
+                }
+            )
+            if int(next_token.item()) == int(getattr(self.tokenizer, "eos_token_id", -1)):
+                break
+            if generated.size(1) >= max_length:
+                break
+
+        generated_text = self.tokenizer.decode(generated[0], skip_special_tokens=True)
+        continuation_ids = generated[0, input_ids.size(1) :]
+        continuation_text = self.tokenizer.decode(continuation_ids, skip_special_tokens=True)
+        return {
+            "prompt": prompt,
+            "generated_text": generated_text,
+            "continuation_text": continuation_text,
+            "steps": step_records,
+        }
