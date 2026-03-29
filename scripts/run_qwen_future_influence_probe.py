@@ -46,6 +46,7 @@ def collect_case_result(
     diag = out["anchor_diagnostics"]
     influence = out["future_influence"]
     aux_diag = out["auxiliary_proposal_diagnostics"]
+    aux_revision_diag = out["auxiliary_revision_diagnostics"]
     scores = influence["scores"][0]
     input_ids = batch["input_ids"][0]
     valid_len = int(batch["attention_mask"][0].sum().item()) if "attention_mask" in batch else int(input_ids.numel())
@@ -125,6 +126,15 @@ def collect_case_result(
             else 0.0
         ),
         "auxiliary_batch_mean_score": float(aux_diag["mean_proposal_score"]),
+        "auxiliary_revision_matched_anchor_count": int(aux_revision_diag["matched_anchor_count"]),
+        "auxiliary_revision_mean_alt_prob": float(aux_revision_diag["mean_alt_prob"]),
+        "auxiliary_revision_mean_matched_proposal_score": float(aux_revision_diag["mean_matched_proposal_score"]),
+        "auxiliary_revision_base_revise_count": int(aux_revision_diag["base_revise_count"]),
+        "auxiliary_revision_revise_count": int(aux_revision_diag["auxiliary_revise_count"]),
+        "auxiliary_revision_revise_gain": int(aux_revision_diag["auxiliary_revise_gain"]),
+        "auxiliary_revision_base_retire_count": int(aux_revision_diag["base_retire_count"]),
+        "auxiliary_revision_retire_count": int(aux_revision_diag["auxiliary_retire_count"]),
+        "auxiliary_revision_retire_delta": int(aux_revision_diag["auxiliary_retire_delta"]),
         **overlap,
         "top_future_tokens": top_tokens,
     }
@@ -156,6 +166,18 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         summary[f"{mode}_mean_auxiliary_proposal_score"] = (
             sum(item.get("auxiliary_mean_proposal_score", 0.0) for item in subset) / len(subset)
         )
+        summary[f"{mode}_mean_auxiliary_revision_matched_anchor_count"] = (
+            sum(item.get("auxiliary_revision_matched_anchor_count", 0) for item in subset) / len(subset)
+        )
+        summary[f"{mode}_mean_auxiliary_revision_alt_prob"] = (
+            sum(item.get("auxiliary_revision_mean_alt_prob", 0.0) for item in subset) / len(subset)
+        )
+        summary[f"{mode}_mean_auxiliary_revision_revise_gain"] = (
+            sum(item.get("auxiliary_revision_revise_gain", 0) for item in subset) / len(subset)
+        )
+        summary[f"{mode}_mean_auxiliary_revision_retire_delta"] = (
+            sum(item.get("auxiliary_revision_retire_delta", 0) for item in subset) / len(subset)
+        )
         summary[f"{mode}_mean_future_loss"] = sum(item["future_loss"] for item in subset) / len(subset)
     if "stable_mean_future_influence" in summary and "conflict_mean_future_influence" in summary:
         summary["future_influence_gap_conflict_minus_stable"] = (
@@ -176,6 +198,30 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     if "stable_mean_auxiliary_proposal_score" in summary and "conflict_mean_auxiliary_proposal_score" in summary:
         summary["auxiliary_proposal_score_gap_conflict_minus_stable"] = (
             summary["conflict_mean_auxiliary_proposal_score"] - summary["stable_mean_auxiliary_proposal_score"]
+        )
+    if (
+        "stable_mean_auxiliary_revision_matched_anchor_count" in summary
+        and "conflict_mean_auxiliary_revision_matched_anchor_count" in summary
+    ):
+        summary["auxiliary_revision_match_gap_conflict_minus_stable"] = (
+            summary["conflict_mean_auxiliary_revision_matched_anchor_count"]
+            - summary["stable_mean_auxiliary_revision_matched_anchor_count"]
+        )
+    if (
+        "stable_mean_auxiliary_revision_revise_gain" in summary
+        and "conflict_mean_auxiliary_revision_revise_gain" in summary
+    ):
+        summary["auxiliary_revision_revise_gain_conflict_minus_stable"] = (
+            summary["conflict_mean_auxiliary_revision_revise_gain"]
+            - summary["stable_mean_auxiliary_revision_revise_gain"]
+        )
+    if (
+        "stable_mean_auxiliary_revision_retire_delta" in summary
+        and "conflict_mean_auxiliary_revision_retire_delta" in summary
+    ):
+        summary["auxiliary_revision_retire_delta_conflict_minus_stable"] = (
+            summary["conflict_mean_auxiliary_revision_retire_delta"]
+            - summary["stable_mean_auxiliary_revision_retire_delta"]
         )
     return summary
 
@@ -229,19 +275,31 @@ def build_markdown_report(
         lines.append(
             f"- Conflict minus stable auxiliary proposal-score gap: `{summary['auxiliary_proposal_score_gap_conflict_minus_stable']:.4f}`"
         )
+    if "auxiliary_revision_match_gap_conflict_minus_stable" in summary:
+        lines.append(
+            f"- Conflict minus stable auxiliary revision-match gap: `{summary['auxiliary_revision_match_gap_conflict_minus_stable']:.4f}`"
+        )
+    if "auxiliary_revision_revise_gain_conflict_minus_stable" in summary:
+        lines.append(
+            f"- Conflict minus stable auxiliary revise-gain gap: `{summary['auxiliary_revision_revise_gain_conflict_minus_stable']:.4f}`"
+        )
+    if "auxiliary_revision_retire_delta_conflict_minus_stable" in summary:
+        lines.append(
+            f"- Conflict minus stable auxiliary retire-delta gap: `{summary['auxiliary_revision_retire_delta_conflict_minus_stable']:.4f}`"
+        )
 
     lines.extend(
         [
             "",
             "## Case table",
             "",
-            "| Family | Case | Expected | Tokens | Active | Aux proposals | Mean future influence | Anchor-position mean | Span overlap | Max influence | Future loss |",
-            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Family | Case | Expected | Tokens | Active | Aux proposals | Aux matches | Aux revise gain | Mean future influence | Anchor-position mean | Span overlap | Max influence | Future loss |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for item in results:
         lines.append(
-            "| {family} | {name} | {expected_mode} | {tokens} | {num_active} | {auxiliary_proposal_count} | {mean_future_influence:.4f} | "
+            "| {family} | {name} | {expected_mode} | {tokens} | {num_active} | {auxiliary_proposal_count} | {auxiliary_revision_matched_anchor_count} | {auxiliary_revision_revise_gain:+d} | {mean_future_influence:.4f} | "
             "{anchor_position_mean_future_influence:.4f} | {future_span_overlap_ratio:.4f} | {max_future_influence:.4f} | {future_loss:.4f} |".format(**item)
         )
 
@@ -285,6 +343,12 @@ def build_markdown_report(
                 lines.append(
                     f"  - `{proposal['proposal_span'][0]}-{proposal['proposal_span'][1]}` | score `{proposal['proposal_score']:.4f}` | text `{proposal['proposal_text']}`"
                 )
+        lines.append(
+            f"- auxiliary revision: matches `{item['auxiliary_revision_matched_anchor_count']}`, "
+            f"mean alt prob `{item['auxiliary_revision_mean_alt_prob']:.4f}`, "
+            f"revise gain `{item['auxiliary_revision_revise_gain']:+d}`, "
+            f"retire delta `{item['auxiliary_revision_retire_delta']:+d}`"
+        )
         lines.append("")
 
     lines.extend(

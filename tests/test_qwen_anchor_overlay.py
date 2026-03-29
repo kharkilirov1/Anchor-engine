@@ -20,6 +20,7 @@ from scripts.calibrate_qwen_anchor_thresholds import pairwise_family_metrics, sc
 from scripts.analyze_qwen_span_misses import build_analysis, classify_family
 from scripts.compare_qwen_signal_proxies import compare_payloads
 from scripts.evaluate_qwen_auxiliary_proposals import build_auxiliary_report_data
+from scripts.evaluate_qwen_auxiliary_revision import build_auxiliary_revision_report_data
 from scripts.extract_qwen_future_proposal_hints import extract_hint_candidates
 from scripts.run_qwen_future_influence_probe import (
     compute_span_anchor_overlap,
@@ -604,6 +605,74 @@ def test_build_auxiliary_report_data_tracks_future_rescue_gaps():
     assert alpha_row["aux_count_gap"] == 2
 
 
+def test_build_auxiliary_revision_report_data_tracks_revise_gain():
+    anchor_payload = {
+        "results": [
+            {"family": "alpha", "expected_mode": "stable", "mean_contradiction_pressure": 0.4, "mean_viability": 0.4},
+            {"family": "alpha", "expected_mode": "conflict", "mean_contradiction_pressure": 0.3, "mean_viability": 0.5},
+            {"family": "beta", "expected_mode": "stable", "mean_contradiction_pressure": 0.2, "mean_viability": 0.7},
+            {"family": "beta", "expected_mode": "conflict", "mean_contradiction_pressure": 0.4, "mean_viability": 0.3},
+        ]
+    }
+    future_payload = {
+        "results": [
+            {
+                "family": "alpha",
+                "expected_mode": "stable",
+                "anchor_position_mean_future_influence": 0.1,
+                "future_span_overlap_ratio": 0.0,
+                "auxiliary_revision_matched_anchor_count": 0,
+                "auxiliary_revision_revise_gain": 0,
+                "auxiliary_revision_retire_delta": 0,
+                "auxiliary_revision_mean_alt_prob": 0.0,
+                "auxiliary_proposals": [],
+            },
+            {
+                "family": "alpha",
+                "expected_mode": "conflict",
+                "anchor_position_mean_future_influence": 0.5,
+                "future_span_overlap_ratio": 0.0,
+                "auxiliary_revision_matched_anchor_count": 2,
+                "auxiliary_revision_revise_gain": 1,
+                "auxiliary_revision_retire_delta": -1,
+                "auxiliary_revision_mean_alt_prob": 0.7,
+                "auxiliary_proposals": [{"proposal_text": "hint one"}],
+            },
+            {
+                "family": "beta",
+                "expected_mode": "stable",
+                "anchor_position_mean_future_influence": 0.2,
+                "future_span_overlap_ratio": 0.0,
+                "auxiliary_revision_matched_anchor_count": 1,
+                "auxiliary_revision_revise_gain": 0,
+                "auxiliary_revision_retire_delta": 0,
+                "auxiliary_revision_mean_alt_prob": 0.3,
+                "auxiliary_proposals": [{"proposal_text": "stable"}],
+            },
+            {
+                "family": "beta",
+                "expected_mode": "conflict",
+                "anchor_position_mean_future_influence": 0.4,
+                "future_span_overlap_ratio": 0.1,
+                "auxiliary_revision_matched_anchor_count": 1,
+                "auxiliary_revision_revise_gain": 0,
+                "auxiliary_revision_retire_delta": 1,
+                "auxiliary_revision_mean_alt_prob": 0.2,
+                "auxiliary_proposals": [{"proposal_text": "conflict"}],
+            },
+        ]
+    }
+
+    report_data = build_auxiliary_revision_report_data(anchor_payload, future_payload)
+
+    assert report_data["summary"]["family_count"] == 2
+    assert report_data["summary"]["match_wins"] == 1
+    assert report_data["summary"]["revise_gain_wins"] == 1
+    alpha_row = next(row for row in report_data["families"] if row["family"] == "alpha")
+    assert alpha_row["classification"] == "future_rescue"
+    assert alpha_row["revise_gain_gap"] == 1
+
+
 def test_qwen_overlay_emits_future_hint_batches():
     model = _DummyCausalLM()
     tokenizer = _DummyTokenizer()
@@ -622,3 +691,4 @@ def test_qwen_overlay_emits_future_hint_batches():
     assert "future_hint_candidates" in out["future_hint_batches"][0]
     assert "auxiliary_proposal_batches" in out
     assert "auxiliary_proposal_diagnostics" in out
+    assert "auxiliary_revision_diagnostics" in out

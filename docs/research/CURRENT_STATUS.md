@@ -127,3 +127,21 @@ The most useful current rescue examples remain:
 - `quantifier_conflict` → `a witness`
 
 Those spans are now visible as auxiliary proposal-like candidates even when the base detector underperforms on the same family.
+
+An additional offline revision simulation is now in place on top of those auxiliary proposals. This is still heuristic and should not be read as a solved proposal mechanism, but it does produce non-trivial movement:
+
+- conflict matched-anchor wins in `3/8` families;
+- conflict revise-gain wins in `4/8` families;
+- mean conflict-minus-stable revise-gain gap is `+0.3750`;
+- mean conflict-minus-stable retire-delta gap is `-0.3750`.
+
+The most promising current family is `api_framework`:
+
+- stable matched anchors: `1`
+- conflict matched anchors: `4`
+- stable revise gain: `0`
+- conflict revise gain: `2`
+
+That is the first useful sign that future-hint proposals can begin to push the revision controller toward `revise` in a family where the base detector was previously weak.
+
+The weakest current rescue family is still `quantifier`. There, the auxiliary path surfaces `a witness`, but the simulated revision effect is not yet stronger than the stable control. So the current bottleneck has shifted from hint extraction to arbiter/matching calibration.

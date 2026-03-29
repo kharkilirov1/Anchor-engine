@@ -9,6 +9,7 @@ import torch.nn as nn
 from src.model.anchor_detector import AnchorDetector
 from src.model.anchor_memory import AnchorMemory
 from src.model.anchor_monitor import ContradictionMonitor
+from src.model.anchor_types import AnchorRecord, RevisionDecision
 from src.model.anchor_revision import RevisionController
 from src.model.anchor_viability import ViabilityTracker
 from src.model.config import ModelConfig, TOY_CONFIG
@@ -115,6 +116,46 @@ class QwenAnchorOverlay(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
     ) -> dict[str, Any]:
+        detector_out, anchors, contradiction_out, viability_out = self._prepare_anchor_state(
+            hidden=hidden,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+        revised_anchors, revision_events, diagnostics = self._apply_revision_path(
+            anchors=self._clone_anchor_batches(anchors),
+            viability_out=viability_out,
+            arbiter={},
+        )
+        active_anchors = self.anchor_memory.get_active_anchors(revised_anchors)
+        diagnostics["revision_event_count"] = len(revision_events)
+
+        return {
+            "anchor_candidates": detector_out["candidates"],
+            "active_anchors": active_anchors,
+            "anchor_states": [[anchor.state for anchor in batch] for batch in revised_anchors],
+            "contradiction_pressure": contradiction_out["contradiction_pressure"],
+            "viability": viability_out["viability"],
+            "revision_events": revision_events,
+            "anchor_diagnostics": diagnostics,
+            "detector_scores": detector_out["scores"],
+            "proposal_diagnostics": {
+                "proposal_count": 0,
+                "regime_shift_count": 0,
+                "anchors_with_proposal_influence": 0,
+                "mean_proposal_score": 0.0,
+                "mean_blend_ratio": 0.0,
+            },
+            "_pre_revision_anchors": anchors,
+            "_viability_out": viability_out,
+            "_contradiction_out": contradiction_out,
+        }
+
+    def _prepare_anchor_state(
+        self,
+        hidden: torch.Tensor,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+    ) -> tuple[dict[str, Any], list[list[AnchorRecord]], dict[str, Any], dict[str, Any]]:
         anchor_dtype = self.anchor_detector.prior_head.weight.dtype
         anchor_hidden = hidden if hidden.dtype == anchor_dtype else hidden.to(anchor_dtype)
         history = torch.roll(anchor_hidden.detach(), shifts=1, dims=1)
@@ -131,28 +172,133 @@ class QwenAnchorOverlay(nn.Module):
             aux={"input_ids": input_ids},
         )
         viability_out = self.viability_tracker(anchors, contradiction_out)
-        revision_events = self.revision_controller(anchors, viability_out, arbiter={})
-        anchors = self.anchor_memory.apply_revision(anchors, revision_events)
-        active_anchors = self.anchor_memory.get_active_anchors(anchors)
-        diagnostics = self.anchor_memory.export_diagnostics(anchors)
-        diagnostics["revision_event_count"] = len(revision_events)
+        return detector_out, anchors, contradiction_out, viability_out
 
+    def _apply_revision_path(
+        self,
+        anchors: list[list[AnchorRecord]],
+        viability_out: dict[str, Any],
+        arbiter: dict[int, dict[str, Any]],
+    ) -> tuple[list[list[AnchorRecord]], list[RevisionDecision], dict[str, Any]]:
+        revision_events = self.revision_controller(anchors, viability_out, arbiter=arbiter)
+        revised_anchors = self.anchor_memory.apply_revision(anchors, revision_events)
+        diagnostics = self.anchor_memory.export_diagnostics(revised_anchors)
+        return revised_anchors, revision_events, diagnostics
+
+    @staticmethod
+    def _clone_anchor_batches(anchors: list[list[AnchorRecord]]) -> list[list[AnchorRecord]]:
+        return [
+            [
+                AnchorRecord(
+                    id=anchor.id,
+                    start_idx=anchor.start_idx,
+                    end_idx=anchor.end_idx,
+                    repr=anchor.repr.detach().clone(),
+                    score=float(anchor.score.detach().item()) if isinstance(anchor.score, torch.Tensor) else float(anchor.score),
+                    state=anchor.state,
+                    support=float(anchor.support.detach().item()) if isinstance(anchor.support, torch.Tensor) else float(anchor.support),
+                    contradiction_pressure=float(anchor.contradiction_pressure.detach().item())
+                    if isinstance(anchor.contradiction_pressure, torch.Tensor)
+                    else float(anchor.contradiction_pressure),
+                    viability=float(anchor.viability.detach().item()) if isinstance(anchor.viability, torch.Tensor) else float(anchor.viability),
+                    ttl=float(anchor.ttl.detach().item()) if isinstance(anchor.ttl, torch.Tensor) else float(anchor.ttl),
+                    parent_id=anchor.parent_id,
+                    branch_id=anchor.branch_id,
+                    descendant_mass=float(anchor.descendant_mass.detach().item())
+                    if isinstance(anchor.descendant_mass, torch.Tensor)
+                    else (0.0 if anchor.descendant_mass is None else float(anchor.descendant_mass)),
+                    descendant_coherence=float(anchor.descendant_coherence.detach().item())
+                    if isinstance(anchor.descendant_coherence, torch.Tensor)
+                    else (0.0 if anchor.descendant_coherence is None else float(anchor.descendant_coherence)),
+                )
+                for anchor in batch
+            ]
+            for batch in anchors
+        ]
+
+    def _build_auxiliary_arbiter(
+        self,
+        anchors: list[list[AnchorRecord]],
+        auxiliary_proposal_batches: list[list[dict[str, Any]]],
+    ) -> tuple[dict[int, dict[str, Any]], list[dict[str, Any]]]:
+        arbiter: dict[int, dict[str, Any]] = {}
+        batch_summaries: list[dict[str, Any]] = []
+        for batch_anchors, proposals in zip(anchors, auxiliary_proposal_batches):
+            matches = 0
+            alt_prob_sum = 0.0
+            score_sum = 0.0
+            for anchor in batch_anchors:
+                best_match: dict[str, Any] | None = None
+                best_gate = 0.0
+                for proposal in proposals:
+                    start, end = proposal["proposal_span"]
+                    if start <= int(anchor.end_idx):
+                        continue
+                    distance = max(1, int(start) - int(anchor.end_idx))
+                    distance_penalty = 1.0 / float(distance)
+                    proposal_score = float(proposal.get("proposal_score", 0.0))
+                    pressure = float(anchor.contradiction_pressure)
+                    viability = float(anchor.viability)
+                    gate = proposal_score * distance_penalty * (0.25 + 0.75 * pressure) * (1.10 - 0.60 * viability)
+                    if gate > best_gate:
+                        best_gate = gate
+                        best_match = proposal
+                if best_match is None or best_gate <= 0.05:
+                    continue
+                alt_prob = max(0.0, min(0.95, best_gate))
+                arbiter[anchor.id] = {
+                    "prefer_current_prob": 1.0 - alt_prob,
+                    "prefer_alt_prob": alt_prob,
+                    "proposal_score": float(best_match.get("proposal_score", 0.0)),
+                    "proposal_root_token": best_match.get("proposal_root_token"),
+                    "proposal_type": best_match.get("proposal_type", "future_hint_span"),
+                    "proposal_span": best_match.get("proposal_span"),
+                    "proposal_text": best_match.get("proposal_text"),
+                    "distance_from_anchor": int(best_match["proposal_span"][0]) - int(anchor.end_idx),
+                }
+                matches += 1
+                alt_prob_sum += alt_prob
+                score_sum += float(best_match.get("proposal_score", 0.0))
+            batch_summaries.append(
+                {
+                    "matched_anchor_count": matches,
+                    "mean_alt_prob": alt_prob_sum / max(matches, 1),
+                    "mean_matched_proposal_score": score_sum / max(matches, 1),
+                }
+            )
+        return arbiter, batch_summaries
+
+    @staticmethod
+    def _summarize_auxiliary_revision(
+        base_events: list[RevisionDecision],
+        auxiliary_events: list[RevisionDecision],
+        batch_summaries: list[dict[str, Any]],
+    ) -> dict[str, float]:
+        def _count(events: list[RevisionDecision], action: str) -> int:
+            return sum(1 for event in events if event.action == action)
+
+        matched_counts = [item["matched_anchor_count"] for item in batch_summaries]
+        alt_probs = [item["mean_alt_prob"] for item in batch_summaries if item["matched_anchor_count"] > 0]
+        matched_scores = [
+            item["mean_matched_proposal_score"] for item in batch_summaries if item["matched_anchor_count"] > 0
+        ]
+        base_revise = _count(base_events, "revise")
+        auxiliary_revise = _count(auxiliary_events, "revise")
+        base_retire = _count(base_events, "retire")
+        auxiliary_retire = _count(auxiliary_events, "retire")
         return {
-            "anchor_candidates": detector_out["candidates"],
-            "active_anchors": active_anchors,
-            "anchor_states": [[anchor.state for anchor in batch] for batch in anchors],
-            "contradiction_pressure": contradiction_out["contradiction_pressure"],
-            "viability": viability_out["viability"],
-            "revision_events": revision_events,
-            "anchor_diagnostics": diagnostics,
-            "detector_scores": detector_out["scores"],
-            "proposal_diagnostics": {
-                "proposal_count": 0,
-                "regime_shift_count": 0,
-                "anchors_with_proposal_influence": 0,
-                "mean_proposal_score": 0.0,
-                "mean_blend_ratio": 0.0,
-            },
+            "matched_anchor_count": int(sum(matched_counts)),
+            "batches_with_matches": int(sum(1 for count in matched_counts if count > 0)),
+            "mean_alt_prob": float(sum(alt_probs) / max(len(alt_probs), 1)) if alt_probs else 0.0,
+            "mean_matched_proposal_score": (
+                float(sum(matched_scores) / max(len(matched_scores), 1)) if matched_scores else 0.0
+            ),
+            "base_revise_count": int(base_revise),
+            "auxiliary_revise_count": int(auxiliary_revise),
+            "auxiliary_revise_gain": int(auxiliary_revise - base_revise),
+            "base_retire_count": int(base_retire),
+            "auxiliary_retire_count": int(auxiliary_retire),
+            "auxiliary_retire_delta": int(auxiliary_retire - base_retire),
         }
 
     def extract_hidden_batch(
@@ -271,4 +417,22 @@ class QwenAnchorOverlay(nn.Module):
         out["future_hint_batches"] = hint_batches
         out["auxiliary_proposal_batches"] = auxiliary_proposal_batches
         out["auxiliary_proposal_diagnostics"] = summarize_auxiliary_proposals(auxiliary_proposal_batches)
+        auxiliary_arbiter, auxiliary_batch_summaries = self._build_auxiliary_arbiter(
+            anchors=self._clone_anchor_batches(out["_pre_revision_anchors"]),
+            auxiliary_proposal_batches=auxiliary_proposal_batches,
+        )
+        auxiliary_revised_anchors, auxiliary_revision_events, auxiliary_anchor_diagnostics = self._apply_revision_path(
+            anchors=self._clone_anchor_batches(out["_pre_revision_anchors"]),
+            viability_out=out["_viability_out"],
+            arbiter=auxiliary_arbiter,
+        )
+        out["auxiliary_revision_events"] = auxiliary_revision_events
+        out["auxiliary_revision_anchor_diagnostics"] = auxiliary_anchor_diagnostics
+        out["auxiliary_revision_batch_summaries"] = auxiliary_batch_summaries
+        out["auxiliary_revision_diagnostics"] = self._summarize_auxiliary_revision(
+            base_events=out["revision_events"],
+            auxiliary_events=auxiliary_revision_events,
+            batch_summaries=auxiliary_batch_summaries,
+        )
+        out["auxiliary_active_anchors"] = self.anchor_memory.get_active_anchors(auxiliary_revised_anchors)
         return out, batch
