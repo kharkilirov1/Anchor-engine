@@ -480,14 +480,15 @@ class QwenAnchorOverlay(nn.Module):
         When ``adaptive_bias=True`` the effective bias scale is computed
         dynamically at each step based on the current contradiction pressure:
 
-            effective_scale = bias_scale_floor + (bias_scale - bias_scale_floor)
+            effective_scale = adaptive_bias_floor
+                              + (bias_scale - adaptive_bias_floor)
                               * clamp((pressure - min_bias_pressure)
                                       / (1.0 - min_bias_pressure), 0, 1)
 
         This means bias is minimal when the model is on track (low pressure) and
         ramps up only when meaningful semantic drift is detected.  The floor
-        prevents the bias from dropping to zero entirely even when pressure is
-        just above the threshold.
+        prevents the effective bias scale from dropping to zero entirely once
+        pressure is above the activation threshold.
 
         Use ``adaptive_bias=False`` (default) to preserve backward-compatible
         fixed-scale behaviour.

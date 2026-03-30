@@ -260,9 +260,9 @@ def main() -> None:
     parser.add_argument("--min_bias_pressure", type=float, default=0.60)
     parser.add_argument("--max_bias_gate_sum", type=float, default=1.50)
     parser.add_argument("--adaptive_bias", action="store_true", default=False,
-                        help="Scale bias_scale dynamically with contradiction pressure (0 at threshold, max at 1.0)")
+                        help="Scale bias_scale dynamically with contradiction pressure, interpolating from adaptive_bias_floor at threshold to bias_scale near pressure 1.0")
     parser.add_argument("--adaptive_bias_floor", type=float, default=0.10,
-                        help="Minimum effective bias_scale when adaptive_bias is enabled")
+                        help="Minimum effective bias_scale once adaptive bias activates")
     parser.add_argument(
         "--positive_keywords",
         type=str,
