@@ -259,6 +259,10 @@ def main() -> None:
     parser.add_argument("--no_repeat_ngram_size", type=int, default=3)
     parser.add_argument("--min_bias_pressure", type=float, default=0.60)
     parser.add_argument("--max_bias_gate_sum", type=float, default=1.50)
+    parser.add_argument("--adaptive_bias", action="store_true", default=False,
+                        help="Scale bias_scale dynamically with contradiction pressure (0 at threshold, max at 1.0)")
+    parser.add_argument("--adaptive_bias_floor", type=float, default=0.10,
+                        help="Minimum effective bias_scale when adaptive_bias is enabled")
     parser.add_argument(
         "--positive_keywords",
         type=str,
@@ -318,6 +322,8 @@ def main() -> None:
         no_repeat_ngram_size=args.no_repeat_ngram_size,
         min_bias_pressure=args.min_bias_pressure,
         max_bias_gate_sum=args.max_bias_gate_sum,
+        adaptive_bias=args.adaptive_bias,
+        adaptive_bias_floor=args.adaptive_bias_floor,
     )
     base_analysis = analyze_keywords(
         base["continuation_text"],

@@ -472,7 +472,26 @@ class QwenAnchorOverlay(nn.Module):
         no_repeat_ngram_size: int = 3,
         min_bias_pressure: float = 0.60,
         max_bias_gate_sum: float = 1.50,
+        adaptive_bias: bool = False,
+        adaptive_bias_floor: float = 0.10,
     ) -> dict[str, Any]:
+        """Generate text with anchor-guided logits bias.
+
+        When ``adaptive_bias=True`` the effective bias scale is computed
+        dynamically at each step based on the current contradiction pressure:
+
+            effective_scale = bias_scale_floor + (bias_scale - bias_scale_floor)
+                              * clamp((pressure - min_bias_pressure)
+                                      / (1.0 - min_bias_pressure), 0, 1)
+
+        This means bias is minimal when the model is on track (low pressure) and
+        ramps up only when meaningful semantic drift is detected.  The floor
+        prevents the bias from dropping to zero entirely even when pressure is
+        just above the threshold.
+
+        Use ``adaptive_bias=False`` (default) to preserve backward-compatible
+        fixed-scale behaviour.
+        """
         if self.tokenizer is None:
             raise ValueError("tokenizer is required for generate_with_anchor_bias")
 
@@ -518,14 +537,26 @@ class QwenAnchorOverlay(nn.Module):
             mean_pressure = float(diagnostics["mean_contradiction_pressure"])
             bias_diag: list[dict[str, float]]
             if mean_pressure >= float(min_bias_pressure):
+                if adaptive_bias:
+                    pressure_range = max(1.0 - float(min_bias_pressure), 1e-6)
+                    pressure_ratio = min(
+                        1.0,
+                        (mean_pressure - float(min_bias_pressure)) / pressure_range,
+                    )
+                    effective_scale = float(adaptive_bias_floor) + (
+                        float(bias_scale) - float(adaptive_bias_floor)
+                    ) * pressure_ratio
+                else:
+                    effective_scale = float(bias_scale)
                 anchor_bias, bias_diag = compute_anchor_logits_bias(
                     last_hidden=next_hidden,
                     active_anchors=active_anchors,
                     output_projection=output_projection,
                     conflict_threshold=conflict_threshold,
-                    bias_scale=bias_scale,
+                    bias_scale=effective_scale,
                 )
             else:
+                effective_scale = 0.0
                 anchor_bias = torch.zeros_like(next_logits)
                 bias_diag = []
 
@@ -581,6 +612,7 @@ class QwenAnchorOverlay(nn.Module):
                     "revision_event_count": len(revision_events),
                     "bias_nonzero_anchors": len(bias_diag),
                     "bias_gate_sum": gate_sum,
+                    "effective_bias_scale": float(effective_scale),
                     "blocked_ngram_token_count": int(len(blocked_tokens)),
                     "bias_applied": bool(bias_diag),
                 }
