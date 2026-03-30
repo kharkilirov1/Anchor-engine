@@ -1,6 +1,6 @@
 # Current Status
 
-Date: 2026-03-29
+Date: 2026-03-30
 
 ## What this repository is right now
 
@@ -61,6 +61,26 @@ In parallel, the current approved external-test direction is:
 1. attach the anchor engine as an overlay to `Qwen2.5-1.5B`;
 2. run the existing semantic probes on Qwen hidden states;
 3. compare whether anchor diagnostics become more meaningful on a stronger pretrained backbone.
+
+## Active structural next step
+
+The active research direction is now shifting from raw token-level anchor bias toward **anchor-tree / tree-matching control**.
+
+The working hypothesis is:
+- local anchors remain useful for finding important semantic spans;
+- future-influence hints remain useful for surfacing possible missed descendants;
+- but reasoning failures now look increasingly like **tree-level trajectory failures**, not just local anchor misses.
+
+So the next implementation track is:
+1. define typed anchor-tree structures;
+2. encode small expected trees for target domains (`math_ibp`, `code_fastapi`);
+3. match observed trees against expected trees;
+4. use coverage / drift / repair scores before touching generation again.
+
+Canonical implementation plan:
+- `docs/research/ANCHOR_TREE_IMPLEMENTATION_PLAN.md`
+
+This is now the main active path for proposal/revision work. The old token-bias generation path remains useful as a negative/diagnostic baseline, but it is no longer the primary bet for reasoning repair.
 
 ## Qwen overlay update
 

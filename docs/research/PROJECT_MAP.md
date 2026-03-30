@@ -1,6 +1,6 @@
 # Project Map — ABPT
 
-Date: 2026-03-27
+Date: 2026-03-30
 Status: active navigation map
 
 ## 1. What this project is right now
@@ -18,24 +18,27 @@ In current terms:
 
 Read in this order:
 
-1. `docs/research/ANCHOR_THEORY.md`
+1. `docs/research/ANCHOR_TREE_IMPLEMENTATION_PLAN.md`
+   - active implementation plan for tree-level proposal/revision control
+2. `docs/research/ANCHOR_THEORY.md`
    - compact canonical theory memo
-2. `docs/research/MATH_CASES.md`
+3. `docs/research/MATH_CASES.md`
    - compact toy-case set for false-anchor reasoning
-3. `docs/research/ARCHITECTURE_V1.md`
+4. `docs/research/ARCHITECTURE_V1.md`
    - compact canonical architecture memo
-4. `docs/research/SUBSYSTEM_INTERFACES.md`
+5. `docs/research/SUBSYSTEM_INTERFACES.md`
    - last pre-code interface layer
-5. `docs/research/QWEN_INTEGRATION_PLAN.md`
+6. `docs/research/QWEN_INTEGRATION_PLAN.md`
    - approved integration plan for testing the anchor engine on top of a stronger pretrained model
-6. `docs/context.md`
+7. `docs/context.md`
    - bridge from historical ABPT framing to the anchor-centric pivot
-7. `program.md`
+8. `program.md`
    - active research program
 
 ## 3. Active documents
 
 ### Active core
+- `docs/research/ANCHOR_TREE_IMPLEMENTATION_PLAN.md`
 - `docs/research/ANCHOR_THEORY.md`
 - `docs/research/MATH_CASES.md`
 - `docs/research/ARCHITECTURE_V1.md`
@@ -72,9 +75,9 @@ It should not yet be mistaken for a full implementation of the anchor-centric th
 ## 5. Immediate next step
 
 The immediate technical direction is now narrower:
-1. test the anchor engine as an overlay on top of a stronger pretrained model
-2. improve pretrained-backbone initialization for the current anchor layer
-3. clarify which parts of proposal/revision actually survive empirical scrutiny
+1. implement the anchor-tree / tree-matching Sprint 1 core
+2. use tree coverage / drift before adding more generation interventions
+3. only then reconnect proposal/revision to inference on top of the stronger pretrained overlay
 
 ## 6. One-sentence summary
 
