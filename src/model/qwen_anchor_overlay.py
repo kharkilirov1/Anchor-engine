@@ -15,7 +15,12 @@ from src.model.anchor_revision import RevisionController
 from src.model.anchor_viability import ViabilityTracker
 from src.model.config import ModelConfig, TOY_CONFIG
 from src.model.future_influence import FutureInfluenceScorer
-from src.model.qwen_generation_bias import compute_anchor_logits_bias
+from src.model.qwen_generation_bias import (
+    apply_frequency_penalty,
+    apply_no_repeat_ngram,
+    apply_repetition_penalty,
+    compute_anchor_logits_bias,
+)
 from src.model.future_span_hints import (
     build_auxiliary_future_proposals,
     build_future_hint_candidates,
@@ -462,6 +467,11 @@ class QwenAnchorOverlay(nn.Module):
         bias_scale: float = 1.50,
         temperature: float = 1.0,
         greedy: bool = True,
+        repetition_penalty: float = 1.15,
+        frequency_penalty: float = 0.05,
+        no_repeat_ngram_size: int = 3,
+        min_bias_pressure: float = 0.60,
+        max_bias_gate_sum: float = 1.50,
     ) -> dict[str, Any]:
         if self.tokenizer is None:
             raise ValueError("tokenizer is required for generate_with_anchor_bias")
@@ -505,15 +515,44 @@ class QwenAnchorOverlay(nn.Module):
                 arbiter={},
             )
             active_anchors = self.anchor_memory.get_active_anchors(revised_anchors)[0]
-            anchor_bias, bias_diag = compute_anchor_logits_bias(
-                last_hidden=next_hidden,
-                active_anchors=active_anchors,
-                output_projection=output_projection,
-                conflict_threshold=conflict_threshold,
-                bias_scale=bias_scale,
-            )
+            mean_pressure = float(diagnostics["mean_contradiction_pressure"])
+            bias_diag: list[dict[str, float]]
+            if mean_pressure >= float(min_bias_pressure):
+                anchor_bias, bias_diag = compute_anchor_logits_bias(
+                    last_hidden=next_hidden,
+                    active_anchors=active_anchors,
+                    output_projection=output_projection,
+                    conflict_threshold=conflict_threshold,
+                    bias_scale=bias_scale,
+                )
+            else:
+                anchor_bias = torch.zeros_like(next_logits)
+                bias_diag = []
+
+            gate_sum = float(sum(item["gate"] for item in bias_diag))
+            if bias_diag and gate_sum > float(max_bias_gate_sum):
+                scale = float(max_bias_gate_sum) / max(gate_sum, 1e-6)
+                anchor_bias = anchor_bias * scale
+                for item in bias_diag:
+                    item["gate"] = float(item["gate"]) * scale
+                gate_sum = float(sum(item["gate"] for item in bias_diag))
 
             adjusted_logits = next_logits + anchor_bias.to(next_logits.dtype)
+            adjusted_logits = apply_repetition_penalty(
+                logits=adjusted_logits,
+                generated_ids=generated,
+                penalty=repetition_penalty,
+            )
+            adjusted_logits = apply_frequency_penalty(
+                logits=adjusted_logits,
+                generated_ids=generated,
+                penalty=frequency_penalty,
+            )
+            adjusted_logits, blocked_tokens = apply_no_repeat_ngram(
+                logits=adjusted_logits,
+                generated_ids=generated,
+                ngram_size=no_repeat_ngram_size,
+            )
             if temperature != 1.0:
                 adjusted_logits = adjusted_logits / max(float(temperature), 1e-6)
 
@@ -541,7 +580,9 @@ class QwenAnchorOverlay(nn.Module):
                     "dead_end_count": int(diagnostics["dead_end_count"]),
                     "revision_event_count": len(revision_events),
                     "bias_nonzero_anchors": len(bias_diag),
-                    "bias_gate_sum": float(sum(item["gate"] for item in bias_diag)),
+                    "bias_gate_sum": gate_sum,
+                    "blocked_ngram_token_count": int(len(blocked_tokens)),
+                    "bias_applied": bool(bias_diag),
                 }
             )
             if int(next_token.item()) == int(getattr(self.tokenizer, "eos_token_id", -1)):

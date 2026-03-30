@@ -125,7 +125,29 @@ def analyze_keywords(
 ) -> dict[str, Any]:
     lowered = text.lower()
     positive_hits = {token: lowered.count(token) for token in positive_keywords if token in lowered}
-    negative_hits = {token: lowered.count(token) for token in negative_keywords if token in lowered}
+
+    protected_negative_hits: dict[str, int] = {}
+    negative_hits: dict[str, int] = {}
+    for token in negative_keywords:
+        if token not in lowered:
+            continue
+        total = lowered.count(token)
+        protected = 0
+        start = 0
+        while True:
+            idx = lowered.find(token, start)
+            if idx < 0:
+                break
+            prefix = lowered[max(0, idx - 12) : idx]
+            if "vegan " in prefix or "plant-based " in prefix:
+                protected += 1
+            start = idx + len(token)
+        effective = total - protected
+        if effective > 0:
+            negative_hits[token] = effective
+        if protected > 0:
+            protected_negative_hits[token] = protected
+
     first_negative = None
     for token in negative_keywords:
         idx = lowered.find(token)
@@ -140,6 +162,7 @@ def analyze_keywords(
     return {
         "positive_hits": positive_hits,
         "negative_hits": negative_hits,
+        "protected_negative_hits": protected_negative_hits,
         "positive_total": int(sum(positive_hits.values())),
         "negative_total": int(sum(negative_hits.values())),
         "first_positive": first_positive,
@@ -157,6 +180,11 @@ def build_markdown_report(
     max_length: int,
     conflict_threshold: float,
     bias_scale: float,
+    repetition_penalty: float,
+    frequency_penalty: float,
+    no_repeat_ngram_size: int,
+    min_bias_pressure: float,
+    max_bias_gate_sum: float,
     base: dict[str, Any],
     anchor: dict[str, Any],
     base_analysis: dict[str, Any],
@@ -175,6 +203,11 @@ def build_markdown_report(
         f"Max length: `{max_length}`",
         f"Conflict threshold: `{conflict_threshold:.2f}`",
         f"Bias scale: `{bias_scale:.2f}`",
+        f"Repetition penalty: `{repetition_penalty:.2f}`",
+        f"Frequency penalty: `{frequency_penalty:.2f}`",
+        f"No-repeat ngram size: `{no_repeat_ngram_size}`",
+        f"Min bias pressure: `{min_bias_pressure:.2f}`",
+        f"Max bias gate sum: `{max_bias_gate_sum:.2f}`",
         "",
         "## Prompt",
         "",
@@ -188,6 +221,7 @@ def build_markdown_report(
         f"- Anchor positive hits: `{anchor_analysis['positive_total']}`",
         f"- Base negative hits: `{base_analysis['negative_total']}`",
         f"- Anchor negative hits: `{anchor_analysis['negative_total']}`",
+        f"- Anchor protected negative hits: `{sum(anchor_analysis['protected_negative_hits'].values())}`",
         f"- Anchor bias active steps: `{active_bias_steps}`",
         f"- Continuations identical: `{'yes' if base['continuation_text'] == anchor['continuation_text'] else 'no'}`",
         "",
@@ -220,6 +254,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--conflict_threshold", type=float, default=0.55)
     parser.add_argument("--bias_scale", type=float, default=1.50)
+    parser.add_argument("--repetition_penalty", type=float, default=1.15)
+    parser.add_argument("--frequency_penalty", type=float, default=0.05)
+    parser.add_argument("--no_repeat_ngram_size", type=int, default=3)
+    parser.add_argument("--min_bias_pressure", type=float, default=0.60)
+    parser.add_argument("--max_bias_gate_sum", type=float, default=1.50)
     parser.add_argument(
         "--positive_keywords",
         type=str,
@@ -274,6 +313,11 @@ def main() -> None:
         conflict_threshold=args.conflict_threshold,
         bias_scale=args.bias_scale,
         greedy=True,
+        repetition_penalty=args.repetition_penalty,
+        frequency_penalty=args.frequency_penalty,
+        no_repeat_ngram_size=args.no_repeat_ngram_size,
+        min_bias_pressure=args.min_bias_pressure,
+        max_bias_gate_sum=args.max_bias_gate_sum,
     )
     base_analysis = analyze_keywords(
         base["continuation_text"],
@@ -295,6 +339,11 @@ def main() -> None:
         "max_new_tokens": args.max_new_tokens,
         "conflict_threshold": args.conflict_threshold,
         "bias_scale": args.bias_scale,
+        "repetition_penalty": args.repetition_penalty,
+        "frequency_penalty": args.frequency_penalty,
+        "no_repeat_ngram_size": args.no_repeat_ngram_size,
+        "min_bias_pressure": args.min_bias_pressure,
+        "max_bias_gate_sum": args.max_bias_gate_sum,
         "seed": args.seed,
         "positive_keywords": positive_keywords,
         "negative_keywords": negative_keywords,
@@ -311,6 +360,11 @@ def main() -> None:
         max_length=args.max_length,
         conflict_threshold=args.conflict_threshold,
         bias_scale=args.bias_scale,
+        repetition_penalty=args.repetition_penalty,
+        frequency_penalty=args.frequency_penalty,
+        no_repeat_ngram_size=args.no_repeat_ngram_size,
+        min_bias_pressure=args.min_bias_pressure,
+        max_bias_gate_sum=args.max_bias_gate_sum,
         base=base,
         anchor=anchor,
         base_analysis=base_analysis,

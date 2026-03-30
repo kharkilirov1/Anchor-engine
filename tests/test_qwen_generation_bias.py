@@ -4,6 +4,9 @@ import torch
 
 from src.model.anchor_types import AnchorRecord, AnchorState
 from src.model.qwen_generation_bias import (
+    apply_frequency_penalty,
+    apply_no_repeat_ngram,
+    apply_repetition_penalty,
     compute_anchor_generation_gate,
     compute_anchor_logits_bias,
 )
@@ -78,3 +81,33 @@ def test_compute_anchor_logits_bias_emits_signal_when_similarity_low() -> None:
     assert bias.shape == (1, 6)
     assert diagnostics
     assert diagnostics[0]["gate"] > 0.0
+
+
+def test_apply_repetition_penalty_downweights_seen_positive_logits() -> None:
+    logits = torch.tensor([[2.0, 1.0, -1.0]])
+    generated_ids = torch.tensor([[0, 2, 0]])
+    adjusted = apply_repetition_penalty(logits=logits, generated_ids=generated_ids, penalty=1.2)
+    assert adjusted[0, 0] < logits[0, 0]
+    assert adjusted[0, 2] < logits[0, 2]
+    assert adjusted[0, 1] == logits[0, 1]
+
+
+def test_apply_frequency_penalty_tracks_repeat_count() -> None:
+    logits = torch.tensor([[2.0, 1.0, 0.5]])
+    generated_ids = torch.tensor([[1, 1, 2]])
+    adjusted = apply_frequency_penalty(logits=logits, generated_ids=generated_ids, penalty=0.25)
+    assert torch.isclose(adjusted[0, 1], torch.tensor(0.5))
+    assert torch.isclose(adjusted[0, 2], torch.tensor(0.25))
+    assert torch.isclose(adjusted[0, 0], logits[0, 0])
+
+
+def test_apply_no_repeat_ngram_blocks_repeated_trigram_tail() -> None:
+    logits = torch.zeros(1, 6)
+    generated_ids = torch.tensor([[1, 2, 3, 1, 2]])
+    adjusted, blocked = apply_no_repeat_ngram(
+        logits=logits,
+        generated_ids=generated_ids,
+        ngram_size=3,
+    )
+    assert 3 in blocked
+    assert adjusted[0, 3] < -1e20

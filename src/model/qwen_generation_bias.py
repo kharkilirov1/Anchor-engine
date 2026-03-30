@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from typing import Iterable
 
 import torch
@@ -72,3 +73,87 @@ def compute_anchor_logits_bias(
         output_dim = int(output_projection.weight.shape[0])
         bias = torch.zeros(output_dim, device=device, dtype=dtype)
     return bias.unsqueeze(0), diagnostics
+
+
+def apply_repetition_penalty(
+    logits: torch.Tensor,
+    generated_ids: torch.Tensor,
+    penalty: float,
+) -> torch.Tensor:
+    if logits.ndim != 2 or logits.size(0) != 1:
+        raise ValueError("logits must be shaped [1, vocab_size]")
+    if generated_ids.ndim != 2 or generated_ids.size(0) != 1:
+        raise ValueError("generated_ids must be shaped [1, seq_len]")
+    if penalty <= 1.0:
+        return logits
+
+    adjusted = logits.clone()
+    token_ids = generated_ids[0].tolist()
+    for token_id in set(int(token_id) for token_id in token_ids):
+        value = adjusted[0, token_id]
+        adjusted[0, token_id] = torch.where(
+            value > 0,
+            value / penalty,
+            value * penalty,
+        )
+    return adjusted
+
+
+def apply_frequency_penalty(
+    logits: torch.Tensor,
+    generated_ids: torch.Tensor,
+    penalty: float,
+) -> torch.Tensor:
+    if logits.ndim != 2 or logits.size(0) != 1:
+        raise ValueError("logits must be shaped [1, vocab_size]")
+    if generated_ids.ndim != 2 or generated_ids.size(0) != 1:
+        raise ValueError("generated_ids must be shaped [1, seq_len]")
+    if penalty <= 0.0:
+        return logits
+
+    adjusted = logits.clone()
+    counts = Counter(int(token_id) for token_id in generated_ids[0].tolist())
+    for token_id, count in counts.items():
+        adjusted[0, token_id] = adjusted[0, token_id] - (float(count) * penalty)
+    return adjusted
+
+
+def _collect_blocked_tokens_for_ngram(
+    token_ids: list[int],
+    ngram_size: int,
+) -> set[int]:
+    if ngram_size <= 1 or len(token_ids) < ngram_size - 1:
+        return set()
+
+    prefix = tuple(token_ids[-(ngram_size - 1) :])
+    blocked: set[int] = set()
+    for idx in range(len(token_ids) - ngram_size + 1):
+        ngram = token_ids[idx : idx + ngram_size]
+        if tuple(ngram[:-1]) == prefix:
+            blocked.add(int(ngram[-1]))
+    return blocked
+
+
+def apply_no_repeat_ngram(
+    logits: torch.Tensor,
+    generated_ids: torch.Tensor,
+    ngram_size: int,
+) -> tuple[torch.Tensor, set[int]]:
+    if logits.ndim != 2 or logits.size(0) != 1:
+        raise ValueError("logits must be shaped [1, vocab_size]")
+    if generated_ids.ndim != 2 or generated_ids.size(0) != 1:
+        raise ValueError("generated_ids must be shaped [1, seq_len]")
+    if ngram_size <= 1:
+        return logits, set()
+
+    blocked = _collect_blocked_tokens_for_ngram(
+        token_ids=[int(token_id) for token_id in generated_ids[0].tolist()],
+        ngram_size=ngram_size,
+    )
+    if not blocked:
+        return logits, blocked
+
+    adjusted = logits.clone()
+    for token_id in blocked:
+        adjusted[0, token_id] = torch.finfo(adjusted.dtype).min
+    return adjusted, blocked
