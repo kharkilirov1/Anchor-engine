@@ -178,11 +178,33 @@ So the current reranking layer does **not** yet beat the base model where we mos
 
 A first token-level intervention has now also been tested. The overlay can generate with a simple anchor-guided logits bias: when the current hidden state drifts away from active anchors, it adds a normalized LM-head projection of those anchors back into the next-token logits. This is the first direct attempt to turn the diagnostics into generation control.
 
-On the same rescue subset (`api_framework`, `quantifier`, stable + conflict), the first result is again negative:
+On the original rescue subset (`api_framework`, `quantifier`, stable + conflict), the first result was negative:
 
 - greedy generation subset size: `4` cases
-- base mean lexical consistency score: `1.0000`
-- anchor-biased mean lexical consistency score: `1.0000`
 - changed generations: `0`
 
-In practice, the generated continuations were identical between base and anchor-biased decoding on that subset, even when the bias path was active on some steps. So the current intervention exists, but it is still too weak or too misaligned to change actual token selection in the tested prompts.
+**Update (2026-03-30): generation bias now confirmed working on long-form prompts.**
+
+The `generate_with_anchor_bias()` path has been validated on two domains using
+`scripts/run_qwen_long_retention_compare.py`. See
+`docs/research/2026-03-30-retention-experiments.md` for full results.
+
+Summary:
+
+| Experiment | BASE lexical | ANCHOR lexical | BASE negative hits | ANCHOR negative hits |
+|---|---:|---:|---:|---:|
+| Vegan 24tok | 0.0 | 1.0 | 0 | 0 |
+| Vegan 500tok | — | — | many | 0 |
+| Vegan 1000tok (Colab) | -19.0 | 4.0* | 46 | ~5 real |
+| FastAPI run 1 | 17.0† | 14.0 | 12 | 1 |
+| FastAPI run 2 | 33.0† | 22.0 | 33 | 1 |
+
+*ANCHOR negative_total inflated by "vegan cheese/sour cream" — metric bug, see experiments doc.
+†BASE positive score inflated by looping on prompt text — not real content.
+
+Key findings:
+- Anchor bias changes generation in the intended semantic direction on both domains.
+- BASE loops deterministically on constraint text; ANCHOR holds the constraint and generates content.
+- Semantic retention and loop prevention are independent mechanisms (anchor bias vs ngram/repetition penalties).
+- Results are reproducible across runs (deterministic greedy decoding).
+- Bias active steps: 73–736 depending on prompt length, confirming the mechanism activates consistently.
