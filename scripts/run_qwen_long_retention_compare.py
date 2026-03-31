@@ -183,8 +183,13 @@ def build_markdown_report(
     repetition_penalty: float,
     frequency_penalty: float,
     no_repeat_ngram_size: int,
-    min_bias_pressure: float,
     max_bias_gate_sum: float,
+    entropy_top_k: int,
+    entropy_threshold: float,
+    entropy_slope: float,
+    pressure_threshold: float,
+    pressure_slope: float,
+    pressure_rescue_floor: float,
     base: dict[str, Any],
     anchor: dict[str, Any],
     base_analysis: dict[str, Any],
@@ -206,8 +211,13 @@ def build_markdown_report(
         f"Repetition penalty: `{repetition_penalty:.2f}`",
         f"Frequency penalty: `{frequency_penalty:.2f}`",
         f"No-repeat ngram size: `{no_repeat_ngram_size}`",
-        f"Min bias pressure: `{min_bias_pressure:.2f}`",
         f"Max bias gate sum: `{max_bias_gate_sum:.2f}`",
+        f"Entropy top-k: `{entropy_top_k}`",
+        f"Entropy threshold: `{entropy_threshold:.2f}`",
+        f"Entropy slope: `{entropy_slope:.2f}`",
+        f"Pressure threshold: `{pressure_threshold:.2f}`",
+        f"Pressure slope: `{pressure_slope:.2f}`",
+        f"Pressure rescue floor: `{pressure_rescue_floor:.2f}`",
         "",
         "## Prompt",
         "",
@@ -257,12 +267,13 @@ def main() -> None:
     parser.add_argument("--repetition_penalty", type=float, default=1.15)
     parser.add_argument("--frequency_penalty", type=float, default=0.05)
     parser.add_argument("--no_repeat_ngram_size", type=int, default=3)
-    parser.add_argument("--min_bias_pressure", type=float, default=0.60)
     parser.add_argument("--max_bias_gate_sum", type=float, default=1.50)
-    parser.add_argument("--adaptive_bias", action="store_true", default=False,
-                        help="Scale bias_scale dynamically with contradiction pressure, interpolating from adaptive_bias_floor at threshold to bias_scale near pressure 1.0")
-    parser.add_argument("--adaptive_bias_floor", type=float, default=0.10,
-                        help="Minimum effective bias_scale once adaptive bias activates")
+    parser.add_argument("--entropy_top_k", type=int, default=32)
+    parser.add_argument("--entropy_threshold", type=float, default=0.35)
+    parser.add_argument("--entropy_slope", type=float, default=0.08)
+    parser.add_argument("--pressure_threshold", "--min_bias_pressure", dest="pressure_threshold", type=float, default=0.60)
+    parser.add_argument("--pressure_slope", type=float, default=0.08)
+    parser.add_argument("--pressure_rescue_floor", type=float, default=0.20)
     parser.add_argument(
         "--positive_keywords",
         type=str,
@@ -320,10 +331,13 @@ def main() -> None:
         repetition_penalty=args.repetition_penalty,
         frequency_penalty=args.frequency_penalty,
         no_repeat_ngram_size=args.no_repeat_ngram_size,
-        min_bias_pressure=args.min_bias_pressure,
         max_bias_gate_sum=args.max_bias_gate_sum,
-        adaptive_bias=args.adaptive_bias,
-        adaptive_bias_floor=args.adaptive_bias_floor,
+        entropy_top_k=args.entropy_top_k,
+        entropy_threshold=args.entropy_threshold,
+        entropy_slope=args.entropy_slope,
+        pressure_threshold=args.pressure_threshold,
+        pressure_slope=args.pressure_slope,
+        pressure_rescue_floor=args.pressure_rescue_floor,
     )
     base_analysis = analyze_keywords(
         base["continuation_text"],
@@ -348,8 +362,13 @@ def main() -> None:
         "repetition_penalty": args.repetition_penalty,
         "frequency_penalty": args.frequency_penalty,
         "no_repeat_ngram_size": args.no_repeat_ngram_size,
-        "min_bias_pressure": args.min_bias_pressure,
         "max_bias_gate_sum": args.max_bias_gate_sum,
+        "entropy_top_k": args.entropy_top_k,
+        "entropy_threshold": args.entropy_threshold,
+        "entropy_slope": args.entropy_slope,
+        "pressure_threshold": args.pressure_threshold,
+        "pressure_slope": args.pressure_slope,
+        "pressure_rescue_floor": args.pressure_rescue_floor,
         "seed": args.seed,
         "positive_keywords": positive_keywords,
         "negative_keywords": negative_keywords,
@@ -369,8 +388,13 @@ def main() -> None:
         repetition_penalty=args.repetition_penalty,
         frequency_penalty=args.frequency_penalty,
         no_repeat_ngram_size=args.no_repeat_ngram_size,
-        min_bias_pressure=args.min_bias_pressure,
         max_bias_gate_sum=args.max_bias_gate_sum,
+        entropy_top_k=args.entropy_top_k,
+        entropy_threshold=args.entropy_threshold,
+        entropy_slope=args.entropy_slope,
+        pressure_threshold=args.pressure_threshold,
+        pressure_slope=args.pressure_slope,
+        pressure_rescue_floor=args.pressure_rescue_floor,
         base=base,
         anchor=anchor,
         base_analysis=base_analysis,

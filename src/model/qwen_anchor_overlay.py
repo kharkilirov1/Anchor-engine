@@ -20,7 +20,9 @@ from src.model.qwen_generation_bias import (
     apply_frequency_penalty,
     apply_no_repeat_ngram,
     apply_repetition_penalty,
+    compute_entropy_conflict_bias_scale,
     compute_anchor_logits_bias,
+    compute_normalized_entropy,
 )
 from src.model.future_span_hints import (
     build_auxiliary_future_proposals,
@@ -562,29 +564,15 @@ class QwenAnchorOverlay(nn.Module):
         repetition_penalty: float = 1.15,
         frequency_penalty: float = 0.05,
         no_repeat_ngram_size: int = 3,
-        min_bias_pressure: float = 0.60,
         max_bias_gate_sum: float = 1.50,
-        adaptive_bias: bool = False,
-        adaptive_bias_floor: float = 0.10,
+        entropy_top_k: int = 32,
+        entropy_threshold: float = 0.40,
+        entropy_slope: float = 0.08,
+        pressure_threshold: float | None = None,
+        pressure_slope: float = 0.08,
+        pressure_rescue_floor: float = 0.20,
+        min_bias_pressure: float | None = None,
     ) -> dict[str, Any]:
-        """Generate text with anchor-guided logits bias.
-
-        When ``adaptive_bias=True`` the effective bias scale is computed
-        dynamically at each step based on the current contradiction pressure:
-
-            effective_scale = adaptive_bias_floor
-                              + (bias_scale - adaptive_bias_floor)
-                              * clamp((pressure - min_bias_pressure)
-                                      / (1.0 - min_bias_pressure), 0, 1)
-
-        This means bias is minimal when the model is on track (low pressure) and
-        ramps up only when meaningful semantic drift is detected.  The floor
-        prevents the effective bias scale from dropping to zero entirely once
-        pressure is above the activation threshold.
-
-        Use ``adaptive_bias=False`` (default) to preserve backward-compatible
-        fixed-scale behaviour.
-        """
         if self.tokenizer is None:
             raise ValueError("tokenizer is required for generate_with_anchor_bias")
 
@@ -628,39 +616,41 @@ class QwenAnchorOverlay(nn.Module):
             )
             active_anchors = self.anchor_memory.get_active_anchors(revised_anchors)[0]
             mean_pressure = float(diagnostics["mean_contradiction_pressure"])
+            effective_pressure_threshold = (
+                float(min_bias_pressure)
+                if min_bias_pressure is not None
+                else (0.60 if pressure_threshold is None else float(pressure_threshold))
+            )
+            normalized_entropy = float(compute_normalized_entropy(next_logits, top_k=entropy_top_k).item())
+            alpha_diag = compute_entropy_conflict_bias_scale(
+                normalized_entropy=normalized_entropy,
+                contradiction_pressure=mean_pressure,
+                alpha_max=float(bias_scale),
+                entropy_threshold=float(entropy_threshold),
+                pressure_threshold=effective_pressure_threshold,
+                entropy_slope=float(entropy_slope),
+                pressure_slope=float(pressure_slope),
+                pressure_rescue_floor=float(pressure_rescue_floor),
+            )
             bias_diag: list[dict[str, float]]
-            if mean_pressure >= float(min_bias_pressure):
-                if adaptive_bias:
-                    pressure_range = max(1.0 - float(min_bias_pressure), 1e-6)
-                    pressure_ratio = min(
-                        1.0,
-                        (mean_pressure - float(min_bias_pressure)) / pressure_range,
-                    )
-                    effective_scale = float(adaptive_bias_floor) + (
-                        float(bias_scale) - float(adaptive_bias_floor)
-                    ) * pressure_ratio
-                else:
-                    effective_scale = float(bias_scale)
-                anchor_bias, bias_diag = compute_anchor_logits_bias(
-                    last_hidden=next_hidden,
-                    active_anchors=active_anchors,
-                    output_projection=output_projection,
-                    conflict_threshold=conflict_threshold,
-                    bias_scale=effective_scale,
-                )
-            else:
-                effective_scale = 0.0
-                anchor_bias = torch.zeros_like(next_logits)
-                bias_diag = []
+            raw_anchor_bias, bias_diag = compute_anchor_logits_bias(
+                last_hidden=next_hidden,
+                active_anchors=active_anchors,
+                output_projection=output_projection,
+                conflict_threshold=conflict_threshold,
+                bias_scale=1.0,
+            )
 
             gate_sum = float(sum(item["gate"] for item in bias_diag))
             if bias_diag and gate_sum > float(max_bias_gate_sum):
                 scale = float(max_bias_gate_sum) / max(gate_sum, 1e-6)
-                anchor_bias = anchor_bias * scale
+                raw_anchor_bias = raw_anchor_bias * scale
                 for item in bias_diag:
                     item["gate"] = float(item["gate"]) * scale
                 gate_sum = float(sum(item["gate"] for item in bias_diag))
 
+            effective_scale = float(alpha_diag["alpha_t"])
+            anchor_bias = raw_anchor_bias * effective_scale
             adjusted_logits = next_logits + anchor_bias.to(next_logits.dtype)
             adjusted_logits = apply_repetition_penalty(
                 logits=adjusted_logits,
@@ -706,8 +696,11 @@ class QwenAnchorOverlay(nn.Module):
                     "bias_nonzero_anchors": len(bias_diag),
                     "bias_gate_sum": gate_sum,
                     "effective_bias_scale": float(effective_scale),
+                    "normalized_entropy": float(normalized_entropy),
+                    "entropy_gate": float(alpha_diag["entropy_gate"]),
+                    "pressure_gate": float(alpha_diag["pressure_gate"]),
                     "blocked_ngram_token_count": int(len(blocked_tokens)),
-                    "bias_applied": bool(bias_diag),
+                    "bias_applied": bool(bias_diag) and effective_scale > 0.0,
                 }
             )
             if int(next_token.item()) == int(getattr(self.tokenizer, "eos_token_id", -1)):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import math
 from typing import Iterable
 
 import torch
@@ -23,6 +24,51 @@ def compute_anchor_generation_gate(
         * (0.20 + 0.80 * float(contradiction_pressure))
         * (0.55 + 0.45 * float(viability))
     )
+
+
+def compute_normalized_entropy(
+    logits: torch.Tensor,
+    top_k: int | None = None,
+) -> torch.Tensor:
+    if logits.ndim != 2:
+        raise ValueError("logits must be shaped [batch, vocab_size]")
+    if top_k is not None:
+        top_k = max(1, min(int(top_k), int(logits.size(-1))))
+        if top_k == 1:
+            return torch.zeros(logits.size(0), device=logits.device, dtype=logits.dtype)
+        logits = torch.topk(logits, k=top_k, dim=-1).values
+        norm_value = math.log(float(top_k))
+    else:
+        norm_value = math.log(float(logits.size(-1)))
+    probs = F.softmax(logits, dim=-1)
+    entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=-1)
+    norm = torch.tensor(norm_value, device=logits.device, dtype=logits.dtype).clamp_min(1e-12)
+    return entropy / norm
+
+
+def compute_entropy_conflict_bias_scale(
+    normalized_entropy: float,
+    contradiction_pressure: float,
+    alpha_max: float,
+    entropy_threshold: float,
+    pressure_threshold: float,
+    entropy_slope: float,
+    pressure_slope: float,
+    pressure_rescue_floor: float,
+) -> dict[str, float]:
+    entropy_gate = torch.sigmoid(
+        torch.tensor((float(normalized_entropy) - float(entropy_threshold)) / max(float(entropy_slope), 1e-6))
+    ).item()
+    pressure_gate = torch.sigmoid(
+        torch.tensor((float(contradiction_pressure) - float(pressure_threshold)) / max(float(pressure_slope), 1e-6))
+    ).item()
+    rescue_floor = min(1.0, max(0.0, float(pressure_rescue_floor)))
+    alpha_t = float(alpha_max) * float(pressure_gate) * (rescue_floor + (1.0 - rescue_floor) * float(entropy_gate))
+    return {
+        "alpha_t": float(alpha_t),
+        "entropy_gate": float(entropy_gate),
+        "pressure_gate": float(pressure_gate),
+    }
 
 
 def compute_anchor_logits_bias(
