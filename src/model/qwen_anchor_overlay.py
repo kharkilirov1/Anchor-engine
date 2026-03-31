@@ -32,6 +32,8 @@ from src.model.future_span_hints import (
 from src.model.anchor_tree_builder import build_observed_tree
 from src.model.anchor_tree_match import greedy_tree_match
 from src.model.anchor_tree_templates import get_expected_tree_template
+from src.model.anchor_tree_consistency import compute_graph_consistency, compute_tree_consistency
+from src.model.anchor_tree_proposals import rank_proposals_by_tree_repair
 
 
 class QwenAnchorOverlay(nn.Module):
@@ -444,31 +446,50 @@ class QwenAnchorOverlay(nn.Module):
                 for anchor in out["active_anchors"][batch_idx]
                 if valid_len > 0
             ]
+            base_observed_tree = build_observed_tree(
+                text=texts[batch_idx],
+                active_anchors=active_anchor_payloads,
+                future_hint_candidates=future_hint_candidates,
+                auxiliary_proposals=[],
+            )
             observed_tree = build_observed_tree(
                 text=texts[batch_idx],
                 active_anchors=active_anchor_payloads,
                 future_hint_candidates=future_hint_candidates,
                 auxiliary_proposals=auxiliary_proposals,
+                domain=base_observed_tree.domain,
             )
             tree_match = None
             tree_diagnostics = None
+            proposal_repair = []
             if observed_tree.domain != "unknown":
                 expected_tree = get_expected_tree_template(observed_tree.domain)
                 tree_match = greedy_tree_match(observed_tree, expected_tree)
+                consistency = compute_tree_consistency(observed_tree, expected_tree)
+                proposal_repair = rank_proposals_by_tree_repair(
+                    current_tree=base_observed_tree,
+                    expected_tree=expected_tree,
+                    proposal_candidates=auxiliary_proposals,
+                )
                 tree_diagnostics = {
                     "domain": observed_tree.domain,
-                    "coverage": float(tree_match.coverage),
-                    "spurious_ratio": float(tree_match.spurious_ratio),
-                    "alignment_score": float(tree_match.alignment_score),
-                    "missing_required_count": int(len(tree_match.missing_required_ids)),
-                    "order_violations": int(tree_match.order_violations),
+                    "coverage": float(consistency.coverage),
+                    "spurious_ratio": float(consistency.spurious_ratio),
+                    "alignment_score": float(consistency.alignment_score),
+                    "missing_required_count": int(consistency.missing_required_count),
+                    "order_violations": int(consistency.order_violations),
+                    "drift_score": float(consistency.drift_score),
+                    "repair_candidate_count": int(len(proposal_repair)),
+                    "best_repair_gain": float(proposal_repair[0].repair_gain) if proposal_repair else 0.0,
                 }
             observed_tree_batches.append(
                 {
                     "domain": observed_tree.domain,
+                    "base_observed_tree": base_observed_tree,
                     "observed_tree": observed_tree,
                     "tree_match": tree_match,
                     "tree_diagnostics": tree_diagnostics,
+                    "proposal_repair": proposal_repair,
                 }
             )
             hint_batches.append(
@@ -484,6 +505,8 @@ class QwenAnchorOverlay(nn.Module):
             )
         out["future_hint_batches"] = hint_batches
         out["observed_tree_batches"] = observed_tree_batches
+        observed_trees = [batch_item["observed_tree"] for batch_item in observed_tree_batches]
+        out["observed_tree_graph_diagnostics"] = compute_graph_consistency(observed_trees)
         out["auxiliary_proposal_batches"] = auxiliary_proposal_batches
         out["auxiliary_proposal_diagnostics"] = summarize_auxiliary_proposals(auxiliary_proposal_batches)
         auxiliary_arbiter, auxiliary_batch_summaries = self._build_auxiliary_arbiter(

@@ -697,6 +697,8 @@ def test_qwen_overlay_emits_future_hint_batches():
     assert "observed_tree_batches" in out
     assert len(out["observed_tree_batches"]) == 1
     assert out["observed_tree_batches"][0]["observed_tree"].source_kind == "observed"
+    assert "observed_tree_graph_diagnostics" in out
+    assert "proposal_repair" in out["observed_tree_batches"][0]
 
 
 def test_auxiliary_arbiter_uses_one_to_one_matching():
