@@ -159,7 +159,7 @@ def test_build_bias_token_weights_returns_domain_profile() -> None:
     assert weights.shape == (6,)
     assert diag["domain"] == "vegan"
     assert weights[0] < 0.1
-    assert weights[3] == 0.0
+    assert weights[3] == 0.0  # Blocked terms have weight 0.0 (hard block via apply_forbidden_token_penalty)
     assert weights[4] > 1.0
     assert 3 in blocked_ids
     assert diag["masked_token_fraction"] >= 0.0
@@ -168,7 +168,7 @@ def test_build_bias_token_weights_returns_domain_profile() -> None:
 def test_get_bias_domain_profile_detects_math_prompt() -> None:
     profile = get_bias_domain_profile("Prove that sqrt(2)+sqrt(3) is irrational by contradiction.")
     assert profile.name == "math"
-    assert profile.alpha_multiplier < 0.5
+    assert 0.3 <= profile.alpha_multiplier <= 0.4  # Conservative 0.35 (increased from 0.18)
 
 
 def test_apply_forbidden_token_penalty_suppresses_blocked_ids() -> None:

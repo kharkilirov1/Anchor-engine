@@ -29,15 +29,9 @@ _GENERIC_BIAS_TERMS: tuple[str, ...] = (
     "a",
     "an",
     "and",
-    "or",
-    "you",
-    "write",
-    "describe",
-    "create",
-    "properties",
-    "theory",
-    "algebra",
 )
+# Note: reduced from original 12 terms to 4 core articles/conjunctions
+# Weight reduced to 0.01 in build_bias_token_weights
 
 _DEFAULT_DOMAIN_PROFILE = BiasDomainProfile(
     name="default",
@@ -51,11 +45,11 @@ _DEFAULT_DOMAIN_PROFILE = BiasDomainProfile(
 )
 _MATH_DOMAIN_PROFILE = BiasDomainProfile(
     name="math",
-    alpha_multiplier=0.18,
+    alpha_multiplier=0.35,  # Conservative increase from 0.18 (was 0.65 - too aggressive)
     pressure_threshold_shift=0.22,
     rescue_floor_multiplier=0.20,
     forbidden_penalty=4.0,
-    hard_block_forbidden=False,
+    hard_block_forbidden=True,  # Enable hard block for constraint violations
     allow_terms=(
         "assume",
         "suppose",
@@ -88,7 +82,7 @@ _CODE_DOMAIN_PROFILE = BiasDomainProfile(
     pressure_threshold_shift=0.04,
     rescue_floor_multiplier=0.85,
     forbidden_penalty=6.0,
-    hard_block_forbidden=False,
+    hard_block_forbidden=True,  # Enable hard block for constraint violations
     allow_terms=(
         "fastapi",
         "async",
@@ -116,11 +110,11 @@ _CODE_DOMAIN_PROFILE = BiasDomainProfile(
 )
 _VEGAN_DOMAIN_PROFILE = BiasDomainProfile(
     name="vegan",
-    alpha_multiplier=0.32,
+    alpha_multiplier=0.32,  # Reverted to original value
     pressure_threshold_shift=0.12,
     rescue_floor_multiplier=0.35,
     forbidden_penalty=8.0,
-    hard_block_forbidden=False,
+    hard_block_forbidden=True,  # Enable hard block for constraint violations
     allow_terms=(
         "vegan",
         "plant",
@@ -305,7 +299,7 @@ def build_bias_token_weights(
         )
     for token_id in generic_ids:
         if 0 <= token_id < vocab_size:
-            weights[token_id] = min(float(weights[token_id].item()), 0.05)
+            weights[token_id] = min(float(weights[token_id].item()), 0.01)  # Reduced from 0.05
 
     blocked_ids: set[int] = set()
     for term in profile.block_terms:
@@ -316,7 +310,7 @@ def build_bias_token_weights(
         )
     for token_id in blocked_ids:
         if 0 <= token_id < vocab_size:
-            weights[token_id] = 0.0
+            weights[token_id] = 0.0  # Mask out blocked terms (hard block via hard_block_forbidden flag)
 
     allow_ids: set[int] = set()
     for term in profile.allow_terms:

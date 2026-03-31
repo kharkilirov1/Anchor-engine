@@ -408,6 +408,34 @@ class QwenAnchorOverlay(nn.Module):
             )
         return arbiter, batch_summaries
 
+    def _build_base_arbiter(
+        self,
+        anchors: list[list[AnchorRecord]],
+        revision_threshold: float = 0.45,
+    ) -> dict[int, dict[str, Any]]:
+        """Build arbiter from anchors without external proposals.
+        
+        When anchor shows high contradiction pressure with low viability,
+        suggest revision action to the revision controller.
+        """
+        arbiter: dict[int, dict[str, Any]] = {}
+        for batch_anchors in anchors:
+            for anchor in batch_anchors:
+                pressure = float(anchor.contradiction_pressure)
+                viability = float(anchor.viability)
+                # High pressure + low viability = suggest revision
+                if pressure > revision_threshold and viability < 0.5:
+                    alt_prob = min(0.9, pressure * (1.0 - viability))
+                    arbiter[anchor.id] = {
+                        "prefer_current_prob": 1.0 - alt_prob,
+                        "prefer_alt_prob": alt_prob,
+                        "proposal_score": pressure * (1.0 - viability),
+                        "proposal_type": "pressure_triggered_revision",
+                        "anchor_pressure": pressure,
+                        "anchor_viability": viability,
+                    }
+        return arbiter
+
     @staticmethod
     def _auxiliary_match_gate(anchor: AnchorRecord, proposal: dict[str, Any]) -> float:
         start = int(proposal["proposal_span"][0])
@@ -720,10 +748,15 @@ class QwenAnchorOverlay(nn.Module):
                 input_ids=generated,
                 attention_mask=generated_mask,
             )
+            # Build base arbiter with pressure-based revision suggestions
+            base_arbiter = self._build_base_arbiter(
+                anchors=anchors,
+                revision_threshold=float(self.cfg.anchor_revision_threshold),
+            )
             revised_anchors, revision_events, diagnostics = self._apply_revision_path(
                 anchors=self._clone_anchor_batches(anchors),
                 viability_out=viability_out,
-                arbiter={},
+                arbiter=base_arbiter,
             )
             active_anchors = self.anchor_memory.get_active_anchors(revised_anchors)[0]
             dependency_graph = self._compute_dependency_graph(

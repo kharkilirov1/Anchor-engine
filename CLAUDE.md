@@ -40,6 +40,11 @@ See `docs/context.md` for full architecture context from the research proposal.
 - Integration test: full model forward + backward on random data
 - Ablation test: each config produces valid model
 
+## Verification Mandate
+- After any code change: run `pytest` before reporting done.
+- After any model architecture change: run `python -m pytest tests/ -x` and confirm no shape errors.
+- Never claim "done" without verified test pass or explicit statement that tests are absent.
+
 ## Commit Style
 - feat: new module/feature
 - fix: bug fix

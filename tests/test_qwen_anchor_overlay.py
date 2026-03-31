@@ -310,7 +310,7 @@ def test_generate_with_anchor_bias_logs_dependency_pressure(monkeypatch: pytest.
     assert step["graph_contradiction_pressure"] == pytest.approx(0.2)
     assert step["effective_contradiction_pressure"] == pytest.approx(0.2)
     assert step["bias_domain"] == "math"
-    assert step["bias_alpha_multiplier"] < 0.5
+    assert 0.3 <= step["bias_alpha_multiplier"] <= 0.4  # Conservative 0.35 (increased from 0.18)
     assert "forbidden_token_count" in step
     assert "forbidden_penalty" in step
     assert "top_biased_tokens" in step
