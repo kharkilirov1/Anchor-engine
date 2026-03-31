@@ -909,3 +909,212 @@ class QwenAnchorOverlay(nn.Module):
             "continuation_text": continuation_text,
             "steps": step_records,
         }
+
+
+    def tree_guided_generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 256,
+        max_length: int = 512,
+        temperature: float = 0.7,
+        chunk_size: int = 20,
+        tree_check_interval: int = 10,
+        max_revisions: int = 3,
+        repetition_penalty: float = 1.15,
+        frequency_penalty: float = 0.05,
+        no_repeat_ngram_size: int = 3,
+        hard_block_forbidden: bool = True,
+    ) -> dict[str, Any]:
+        """Tree-guided generation with structural validation.
+        
+        Instead of token-level bias, this method generates in chunks,
+        validates structure against expected tree template, and revises
+        if drift is detected.
+        
+        This removes need for hardcoded token lists - structure is enforced
+        at the tree level, not token level.
+        """
+        if self.tokenizer is None:
+            raise ValueError("tokenizer is required for tree_guided_generate")
+        
+        from src.model.anchor_tree_domain import detect_tree_domain
+        
+        encoded = self.tokenizer(
+            [prompt],
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt",
+        )
+        device = next(self.parameters()).device
+        input_ids = encoded["input_ids"].to(device)
+        attention_mask = encoded["attention_mask"].to(device)
+        generated = input_ids
+        generated_mask = attention_mask
+        
+        # Get forbidden token IDs for hard blocking only
+        _, forbidden_token_ids, _ = build_bias_token_weights(
+            tokenizer=self.tokenizer,
+            vocab_size=int(self.base_model.config.vocab_size),
+            device=device,
+            prompt=prompt,
+        )
+        
+        step_records: list[dict[str, Any]] = []
+        total_tokens = 0
+        revision_count = 0
+        chunk_revisions = 0
+        
+        # Detect domain from prompt for tree template
+        domain = detect_tree_domain(prompt)
+        expected_tree = get_expected_tree_template(domain) if domain != "unknown" else None
+        
+        def validate_structure(text: str) -> tuple[bool, float, dict]:
+            """Validate generated text against expected tree structure."""
+            if expected_tree is None:
+                return True, 1.0, {"reason": "no_expected_tree"}
+            
+            # Build observed tree from generated text
+            observed = build_observed_tree(
+                text=text,
+                active_anchors=[],
+                future_hint_candidates=[],
+                auxiliary_proposals=[],
+            )
+            
+            if observed.domain == "unknown":
+                return True, 0.5, {"reason": "unknown_domain"}
+            
+            # Compute consistency
+            consistency = compute_tree_consistency(observed, expected_tree)
+            
+            # Check for spurious branches (drift indicators)
+            is_valid = (
+                consistency.coverage >= 0.5 and
+                consistency.spurious_ratio < 0.3 and
+                consistency.drift_score < 0.5
+            )
+            
+            diagnostics = {
+                "coverage": float(consistency.coverage),
+                "spurious_ratio": float(consistency.spurious_ratio),
+                "alignment_score": float(consistency.alignment_score),
+                "drift_score": float(consistency.drift_score),
+                "missing_count": int(consistency.missing_required_count),
+                "order_violations": int(consistency.order_violations),
+            }
+            
+            return is_valid, consistency.alignment_score, diagnostics
+        
+        while total_tokens < max_new_tokens:
+            # Generate a chunk
+            chunk_tokens = min(chunk_size, max_new_tokens - total_tokens)
+            chunk_generated = 0
+            chunk_start_len = generated.size(1)
+            
+            for _ in range(chunk_tokens):
+                outputs = self.base_model(
+                    input_ids=generated,
+                    attention_mask=generated_mask,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                
+                next_logits = torch.nan_to_num(outputs.logits[:, -1, :], nan=0.0, posinf=1e4, neginf=-1e4)
+                
+                # Apply only hard block on forbidden tokens (no token bias!)
+                if hard_block_forbidden and forbidden_token_ids:
+                    next_logits = apply_forbidden_token_penalty(
+                        logits=next_logits,
+                        forbidden_token_ids=forbidden_token_ids,
+                        penalty=float(1e6),
+                        hard_block=True,
+                    )
+                
+                # Apply repetition/frequency penalties
+                next_logits = apply_repetition_penalty(
+                    logits=next_logits,
+                    generated_ids=generated,
+                    penalty=repetition_penalty,
+                )
+                next_logits = apply_frequency_penalty(
+                    logits=next_logits,
+                    generated_ids=generated,
+                    penalty=frequency_penalty,
+                )
+                next_logits, _ = apply_no_repeat_ngram(
+                    logits=next_logits,
+                    generated_ids=generated,
+                    ngram_size=no_repeat_ngram_size,
+                )
+                
+                if temperature != 1.0:
+                    next_logits = next_logits / max(float(temperature), 1e-6)
+                
+                # Sample next token
+                probs = F.softmax(next_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                
+                generated = torch.cat([generated, next_token], dim=1)
+                generated_mask = torch.cat([
+                    generated_mask,
+                    torch.ones((generated_mask.size(0), 1), device=device, dtype=generated_mask.dtype),
+                ], dim=1)
+                
+                chunk_generated += 1
+                total_tokens += 1
+                
+                # Check for EOS
+                if int(next_token.item()) == int(getattr(self.tokenizer, "eos_token_id", -1)):
+                    break
+                if generated.size(1) >= max_length:
+                    break
+            
+            # Decode chunk for structure validation
+            current_text = self.tokenizer.decode(generated[0], skip_special_tokens=True)
+            
+            # Validate structure every tree_check_interval tokens
+            if total_tokens % tree_check_interval == 0 or chunk_generated < chunk_tokens:
+                is_valid, score, diag = validate_structure(current_text)
+                
+                step_records.append({
+                    "chunk_start": chunk_start_len - input_ids.size(1),
+                    "chunk_size": chunk_generated,
+                    "total_tokens": total_tokens,
+                    "is_valid": is_valid,
+                    "consistency_score": score,
+                    "structure_diagnostics": diag,
+                    "revision_attempts": chunk_revisions,
+                })
+                
+                # If invalid and we haven't maxed revisions, rollback and retry
+                if not is_valid and revision_count < max_revisions and chunk_revisions < max_revisions:
+                    # Rollback to chunk start
+                    generated = generated[:, :chunk_start_len]
+                    generated_mask = generated_mask[:, :chunk_start_len]
+                    total_tokens -= chunk_generated
+                    revision_count += 1
+                    chunk_revisions += 1
+                    
+                    # Increase temperature for diversity on retry
+                    temperature = min(temperature * 1.1, 1.5)
+                    continue
+                else:
+                    chunk_revisions = 0
+            
+            if generated.size(1) >= max_length:
+                break
+        
+        generated_text = self.tokenizer.decode(generated[0], skip_special_tokens=True)
+        continuation_ids = generated[0, input_ids.size(1):]
+        continuation_text = self.tokenizer.decode(continuation_ids, skip_special_tokens=True)
+        
+        return {
+            "prompt": prompt,
+            "generated_text": generated_text,
+            "continuation_text": continuation_text,
+            "steps": step_records,
+            "domain": domain,
+            "revision_count": revision_count,
+            "tree_guided": True,
+        }
