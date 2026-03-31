@@ -36,12 +36,34 @@ _CODE_STEP_ORDER = {
     "template_rendering_branch": 52,
 }
 
+_QUANTIFIER_STEP_ORDER = {
+    "universal_quantifier_scope": 0,
+    "preserve_universal_claim": 1,
+    "reject_existential_drift": 2,
+    "restate_universal_conclusion": 3,
+    "existential_witness_shift": 50,
+    "drop_universal_scope": 51,
+}
+
+_PROOF_MODE_STEP_ORDER = {
+    "proof_by_contradiction_mode": 0,
+    "maintain_negation_assumption": 1,
+    "derive_contradiction": 2,
+    "discharge_negation_assumption": 3,
+    "direct_proof_switch": 50,
+    "constructive_reset": 51,
+}
+
 
 def _domain_root_label(domain: str | None) -> str:
     if domain == "math_ibp":
         return "integration_by_parts_only"
     if domain == "code_fastapi":
         return "async_fastapi_service"
+    if domain == "quantifier":
+        return "universal_quantifier_scope"
+    if domain == "proof_mode":
+        return "proof_by_contradiction_mode"
     return "observed_root"
 
 
@@ -50,6 +72,10 @@ def _step_order(domain: str | None) -> dict[str, int]:
         return _MATH_STEP_ORDER
     if domain == "code_fastapi":
         return _CODE_STEP_ORDER
+    if domain == "quantifier":
+        return _QUANTIFIER_STEP_ORDER
+    if domain == "proof_mode":
+        return _PROOF_MODE_STEP_ORDER
     return {}
 
 
@@ -107,11 +133,47 @@ def _classify_code_label(text: str) -> str:
     return "code_observed_step"
 
 
+def _classify_quantifier_label(text: str) -> str:
+    lowered = text.lower()
+    if "restore the original universal" in lowered or "restate the universal" in lowered:
+        return "restate_universal_conclusion"
+    if "reject" in lowered and ("existential" in lowered or "witness" in lowered):
+        return "reject_existential_drift"
+    if "there exists" in lowered or "one witness" in lowered or "existential" in lowered:
+        return "existential_witness_shift"
+    if "drop" in lowered and "universal" in lowered:
+        return "drop_universal_scope"
+    if "for all" in lowered or "universal" in lowered:
+        return "preserve_universal_claim"
+    return "quantifier_observed_step"
+
+
+def _classify_proof_mode_label(text: str) -> str:
+    lowered = text.lower()
+    if "contradiction" in lowered and ("keep" in lowered or "return" in lowered or "mode" in lowered):
+        return "proof_by_contradiction_mode"
+    if "assume the negation" in lowered or "assumed negation" in lowered or "negation assumption" in lowered:
+        return "maintain_negation_assumption"
+    if "derive a contradiction" in lowered or "contradiction structure" in lowered:
+        return "derive_contradiction"
+    if "assumption was false" in lowered or "discharge the assumed negation" in lowered:
+        return "discharge_negation_assumption"
+    if "direct proof" in lowered:
+        return "direct_proof_switch"
+    if "constructive proof" in lowered or "from scratch" in lowered:
+        return "constructive_reset"
+    return "proof_mode_observed_step"
+
+
 def classify_observed_label(domain: str | None, text: str) -> str:
     if domain == "math_ibp":
         return _classify_math_label(text)
     if domain == "code_fastapi":
         return _classify_code_label(text)
+    if domain == "quantifier":
+        return _classify_quantifier_label(text)
+    if domain == "proof_mode":
+        return _classify_proof_mode_label(text)
     return "observed_step"
 
 
@@ -126,6 +188,10 @@ def _role_for_label(label: str, source: str, is_root: bool) -> AnchorTreeRole:
         "django_view_reframe",
         "synchronous_handler_reframe",
         "template_rendering_branch",
+        "existential_witness_shift",
+        "drop_universal_scope",
+        "direct_proof_switch",
+        "constructive_reset",
     }:
         return AnchorTreeRole.DRIFT
     if label == "meta_abort":

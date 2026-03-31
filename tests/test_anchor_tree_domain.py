@@ -14,3 +14,15 @@ def test_detect_tree_domain_prefers_fastapi() -> None:
 
     assert detect_tree_domain(text) == "code_fastapi"
 
+
+def test_detect_tree_domain_prefers_quantifier_scope() -> None:
+    text = "Claim: for all natural numbers n the statement is true, so reject any existential witness drift."
+
+    assert detect_tree_domain(text) == "quantifier"
+
+
+def test_detect_tree_domain_prefers_proof_mode() -> None:
+    text = "We assume the negation, derive a contradiction, and must not switch to a direct proof."
+
+    assert detect_tree_domain(text) == "proof_mode"
+

@@ -66,3 +66,50 @@ def test_build_observed_tree_marks_drift_proposals() -> None:
     assert drift_nodes
     assert drift_nodes[0].role in {AnchorTreeRole.DRIFT, AnchorTreeRole.META}
 
+
+def test_build_observed_tree_for_quantifier_recovers_scope_labels() -> None:
+    tree = build_observed_tree(
+        text="Claim: for all natural numbers n the statement is true.",
+        active_anchors=[
+            {"anchor": _make_anchor(1, 0, 6), "text": "for all natural numbers", "start": 0, "end": 3},
+        ],
+        future_hint_candidates=[
+            {"text": "reject existential witness drift", "start": 8, "end": 11, "mean_score": 0.8},
+            {"text": "restate the universal conclusion", "start": 12, "end": 16, "mean_score": 0.7},
+        ],
+        auxiliary_proposals=[],
+    )
+
+    assert tree.domain == "quantifier"
+    assert tree.root().label == "universal_quantifier_scope"
+    labels = {node.label for node in tree.nodes.values()}
+    assert "preserve_universal_claim" in labels
+    assert "reject_existential_drift" in labels
+    assert "restate_universal_conclusion" in labels
+
+
+def test_build_observed_tree_for_proof_mode_marks_direct_switch_as_drift() -> None:
+    tree = build_observed_tree(
+        text="We assume the negation and derive a contradiction.",
+        active_anchors=[
+            {"anchor": _make_anchor(1, 0, 6), "text": "assume the negation and derive a contradiction", "start": 0, "end": 6},
+        ],
+        future_hint_candidates=[
+            {"text": "discharge the assumed negation", "start": 8, "end": 11, "mean_score": 0.8},
+        ],
+        auxiliary_proposals=[
+            {
+                "proposal_text": "switch to a direct proof from scratch",
+                "proposal_span": (12, 17),
+                "proposal_score": 0.9,
+                "repr": torch.ones(8),
+            }
+        ],
+    )
+
+    assert tree.domain == "proof_mode"
+    assert tree.root().label == "proof_by_contradiction_mode"
+    drift_nodes = [node for node in tree.nodes.values() if node.label == "direct_proof_switch"]
+    assert drift_nodes
+    assert drift_nodes[0].role == AnchorTreeRole.DRIFT
+

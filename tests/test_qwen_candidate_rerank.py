@@ -139,3 +139,32 @@ def test_select_best_branch_uses_requested_score_key() -> None:
     best = select_best_branch(candidates, score_key="branch_score")
 
     assert best["name"] == "b"
+
+
+def test_extract_tree_candidate_metrics_zeroes_bonus_for_unknown_domain() -> None:
+    out = {
+        "observed_tree_batches": [
+            {
+                "domain": "unknown",
+                "tree_diagnostics": {
+                    "coverage": 0.0,
+                    "alignment_score": 0.0,
+                    "spurious_ratio": 0.0,
+                    "drift_score": 0.0,
+                },
+                "proposal_repair": [],
+            }
+        ],
+        "observed_tree_graph_diagnostics": {
+            "graph_consistency_score": 1.0,
+            "mean_pair_conflict": 0.0,
+        },
+        "auxiliary_revision_diagnostics": {
+            "mean_repair_gain": 0.0,
+        },
+    }
+
+    metrics = extract_tree_candidate_metrics(out)
+
+    assert metrics["tree_domain"] == "unknown"
+    assert metrics["tree_bonus"] == 0.0

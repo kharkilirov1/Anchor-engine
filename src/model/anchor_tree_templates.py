@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.model.anchor_tree import make_anchor_tree
 from src.model.anchor_tree_types import AnchorTree, AnchorTreeEdge, AnchorTreeNode, AnchorTreeRelation, AnchorTreeRole
 
-_SUPPORTED_DOMAINS = ("math_ibp", "code_fastapi")
+_SUPPORTED_DOMAINS = ("math_ibp", "code_fastapi", "quantifier", "proof_mode")
 
 
 def _node(
@@ -121,11 +121,83 @@ def build_fastapi_expected_tree() -> AnchorTree:
     return tree
 
 
+def build_quantifier_expected_tree() -> AnchorTree:
+    root = _node(
+        "quant_root",
+        "universal_quantifier_scope",
+        "Preserve the universal quantifier reading.",
+        0,
+        AnchorTreeRole.CONSTRAINT,
+        required=True,
+    )
+    nodes = [
+        _node("quant_keep", "preserve_universal_claim", "Keep the for-all claim active.", 1, AnchorTreeRole.STEP, required=True),
+        _node("quant_reject", "reject_existential_drift", "Reject existential witness drift.", 2, AnchorTreeRole.STEP, required=True),
+        _node("quant_conclude", "restate_universal_conclusion", "Restate the universal conclusion.", 3, AnchorTreeRole.DERIVED, required=True),
+    ]
+    edges = [
+        AnchorTreeEdge("quant_root", "quant_keep", AnchorTreeRelation.EXPECTED_NEXT),
+        AnchorTreeEdge("quant_keep", "quant_reject", AnchorTreeRelation.EXPECTED_NEXT),
+        AnchorTreeEdge("quant_reject", "quant_conclude", AnchorTreeRelation.EXPECTED_NEXT),
+    ]
+    tree = make_anchor_tree(
+        tree_id="expected_quantifier",
+        root=root,
+        nodes=nodes,
+        edges=edges,
+        domain="quantifier",
+        source_kind="expected_template",
+    )
+    tree.metadata["forbidden_labels"] = [
+        "existential_witness_shift",
+        "drop_universal_scope",
+    ]
+    return tree
+
+
+def build_proof_mode_expected_tree() -> AnchorTree:
+    root = _node(
+        "proof_root",
+        "proof_by_contradiction_mode",
+        "Preserve proof-by-contradiction mode.",
+        0,
+        AnchorTreeRole.CONSTRAINT,
+        required=True,
+    )
+    nodes = [
+        _node("proof_assume", "maintain_negation_assumption", "Maintain the negation assumption.", 1, AnchorTreeRole.STEP, required=True),
+        _node("proof_contradiction", "derive_contradiction", "Derive an explicit contradiction.", 2, AnchorTreeRole.STEP, required=True),
+        _node("proof_discharge", "discharge_negation_assumption", "Discharge the negation assumption.", 3, AnchorTreeRole.DERIVED, required=True),
+    ]
+    edges = [
+        AnchorTreeEdge("proof_root", "proof_assume", AnchorTreeRelation.EXPECTED_NEXT),
+        AnchorTreeEdge("proof_assume", "proof_contradiction", AnchorTreeRelation.EXPECTED_NEXT),
+        AnchorTreeEdge("proof_contradiction", "proof_discharge", AnchorTreeRelation.EXPECTED_NEXT),
+    ]
+    tree = make_anchor_tree(
+        tree_id="expected_proof_mode",
+        root=root,
+        nodes=nodes,
+        edges=edges,
+        domain="proof_mode",
+        source_kind="expected_template",
+    )
+    tree.metadata["forbidden_labels"] = [
+        "direct_proof_switch",
+        "constructive_reset",
+    ]
+    return tree
+
+
 def get_expected_tree_template(domain: str) -> AnchorTree:
     if domain == "math_ibp":
         return build_math_ibp_expected_tree()
     if domain == "code_fastapi":
         return build_fastapi_expected_tree()
+    if domain == "quantifier":
+        return build_quantifier_expected_tree()
+    if domain == "proof_mode":
+        return build_proof_mode_expected_tree()
     raise ValueError(f"Unsupported anchor-tree domain: {domain}")
 
 

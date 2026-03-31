@@ -132,23 +132,29 @@ def extract_tree_candidate_metrics(
     batch_diag = observed_batches[0] if observed_batches else {}
     tree_diag = batch_diag.get("tree_diagnostics") or {}
     proposal_repair = batch_diag.get("proposal_repair") or []
+    tree_domain = str(batch_diag.get("domain", "unknown"))
     best_repair_gain = float(proposal_repair[0].repair_gain) if proposal_repair else 0.0
-    tree_bonus = compute_tree_bonus(
-        coverage=float(tree_diag.get("coverage", 0.0)),
-        alignment_score=float(tree_diag.get("alignment_score", 0.0)),
-        drift_score=float(tree_diag.get("drift_score", 0.0)),
-        best_repair_gain=best_repair_gain,
-        graph_consistency_score=float(graph_diag.get("graph_consistency_score", 1.0)),
-        mean_repair_gain=float(out.get("auxiliary_revision_diagnostics", {}).get("mean_repair_gain", 0.0)),
-    )
+    graph_consistency_score = float(graph_diag.get("graph_consistency_score", 0.0))
+    mean_repair_gain = float(out.get("auxiliary_revision_diagnostics", {}).get("mean_repair_gain", 0.0))
+    if tree_domain == "unknown":
+        tree_bonus = 0.0
+    else:
+        tree_bonus = compute_tree_bonus(
+            coverage=float(tree_diag.get("coverage", 0.0)),
+            alignment_score=float(tree_diag.get("alignment_score", 0.0)),
+            drift_score=float(tree_diag.get("drift_score", 0.0)),
+            best_repair_gain=best_repair_gain,
+            graph_consistency_score=graph_consistency_score,
+            mean_repair_gain=mean_repair_gain,
+        )
     return {
-        "tree_domain": str(batch_diag.get("domain", "unknown")),
+        "tree_domain": tree_domain,
         "tree_coverage": float(tree_diag.get("coverage", 0.0)),
         "tree_alignment_score": float(tree_diag.get("alignment_score", 0.0)),
         "tree_spurious_ratio": float(tree_diag.get("spurious_ratio", 0.0)),
         "tree_drift_score": float(tree_diag.get("drift_score", 0.0)),
         "tree_best_repair_gain": float(best_repair_gain),
-        "tree_graph_consistency_score": float(graph_diag.get("graph_consistency_score", 1.0)),
+        "tree_graph_consistency_score": graph_consistency_score,
         "tree_mean_pair_conflict": float(graph_diag.get("mean_pair_conflict", 0.0)),
         "tree_bonus": float(tree_bonus),
     }
