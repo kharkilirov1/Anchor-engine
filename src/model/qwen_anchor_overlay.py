@@ -20,6 +20,7 @@ from src.model.qwen_generation_bias import (
     apply_frequency_penalty,
     apply_no_repeat_ngram,
     apply_repetition_penalty,
+    build_bias_token_weights,
     compute_entropy_conflict_bias_scale,
     compute_anchor_logits_bias,
     compute_entropy_stats,
@@ -695,6 +696,12 @@ class QwenAnchorOverlay(nn.Module):
         generated_mask = attention_mask
         step_records: list[dict[str, Any]] = []
         output_projection = self._get_output_projection()
+        bias_token_weights, bias_profile = build_bias_token_weights(
+            tokenizer=self.tokenizer,
+            vocab_size=int(self.base_model.config.vocab_size),
+            device=device,
+            prompt=prompt,
+        )
 
         for _ in range(max_new_tokens):
             outputs = self.base_model(
@@ -729,10 +736,13 @@ class QwenAnchorOverlay(nn.Module):
             mean_pressure = float(diagnostics["mean_contradiction_pressure"])
             graph_pressure = float(dependency_graph["current_graph_pressure"])
             effective_pressure = graph_pressure if int(dependency_graph["edge_count"]) > 0 else mean_pressure
-            effective_pressure_threshold = (
+            domain_pressure_threshold = (
                 float(min_bias_pressure)
                 if min_bias_pressure is not None
                 else (0.60 if pressure_threshold is None else float(pressure_threshold))
+            ) + float(bias_profile["pressure_threshold_shift"])
+            effective_pressure_threshold = (
+                max(0.0, min(1.0, domain_pressure_threshold))
             )
             entropy_stats = compute_entropy_stats(next_logits, top_k=entropy_top_k)
             raw_entropy = float(entropy_stats["raw_entropy"].item())
@@ -740,12 +750,12 @@ class QwenAnchorOverlay(nn.Module):
             alpha_diag = compute_entropy_conflict_bias_scale(
                 normalized_entropy=normalized_entropy,
                 contradiction_pressure=effective_pressure,
-                alpha_max=float(bias_scale),
+                alpha_max=float(bias_scale) * float(bias_profile["alpha_multiplier"]),
                 entropy_threshold=float(entropy_threshold),
                 pressure_threshold=effective_pressure_threshold,
                 entropy_slope=float(entropy_slope),
                 pressure_slope=float(pressure_slope),
-                pressure_rescue_floor=float(pressure_rescue_floor),
+                pressure_rescue_floor=float(pressure_rescue_floor) * float(bias_profile["rescue_floor_multiplier"]),
             )
             bias_diag: list[dict[str, float]]
             raw_anchor_bias, bias_diag = compute_anchor_logits_bias(
@@ -754,6 +764,7 @@ class QwenAnchorOverlay(nn.Module):
                 output_projection=output_projection,
                 conflict_threshold=conflict_threshold,
                 bias_scale=1.0,
+                bias_token_weights=bias_token_weights,
             )
 
             gate_sum = float(sum(item["gate"] for item in bias_diag))
@@ -832,6 +843,11 @@ class QwenAnchorOverlay(nn.Module):
                     "anchor_bias_norm": float(anchor_bias_norm),
                     "bias_isfinite": bool(torch.isfinite(anchor_bias).all().item()),
                     "top_biased_tokens": top_biased_tokens,
+                    "bias_domain": str(bias_profile["domain"]),
+                    "bias_alpha_multiplier": float(bias_profile["alpha_multiplier"]),
+                    "bias_pressure_threshold": float(effective_pressure_threshold),
+                    "bias_masked_token_fraction": float(bias_profile["masked_token_fraction"]),
+                    "bias_boosted_token_fraction": float(bias_profile["boosted_token_fraction"]),
                     "blocked_ngram_token_count": int(len(blocked_tokens)),
                     "bias_applied": bool(bias_diag) and effective_scale > 0.0,
                 }

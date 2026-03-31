@@ -302,13 +302,15 @@ def test_generate_with_anchor_bias_logs_dependency_pressure(monkeypatch: pytest.
     monkeypatch.setattr(overlay, "_apply_revision_path", _fake_apply_revision_path)
     monkeypatch.setattr(overlay, "_compute_dependency_graph", _fake_dependency_graph)
 
-    out = overlay.generate_with_anchor_bias("abc", max_new_tokens=1, max_length=8)
+    out = overlay.generate_with_anchor_bias("Prove sqrt(2) is irrational by contradiction.", max_new_tokens=1, max_length=64)
 
     assert out["steps"]
     step = out["steps"][0]
     assert step["raw_contradiction_pressure"] == pytest.approx(0.9)
     assert step["graph_contradiction_pressure"] == pytest.approx(0.2)
     assert step["effective_contradiction_pressure"] == pytest.approx(0.2)
+    assert step["bias_domain"] == "math"
+    assert step["bias_alpha_multiplier"] < 0.5
     assert "top_biased_tokens" in step
 
 

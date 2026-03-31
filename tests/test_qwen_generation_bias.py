@@ -7,10 +7,12 @@ from src.model.qwen_generation_bias import (
     apply_frequency_penalty,
     apply_no_repeat_ngram,
     apply_repetition_penalty,
+    build_bias_token_weights,
     compute_anchor_generation_gate,
     compute_entropy_conflict_bias_scale,
     compute_anchor_logits_bias,
     compute_normalized_entropy,
+    get_bias_domain_profile,
 )
 
 
@@ -83,6 +85,68 @@ def test_compute_anchor_logits_bias_emits_signal_when_similarity_low() -> None:
     assert bias.shape == (1, 6)
     assert diagnostics
     assert diagnostics[0]["gate"] > 0.0
+
+
+def test_compute_anchor_logits_bias_can_mask_blocked_tokens() -> None:
+    projection = torch.nn.Linear(4, 6, bias=False)
+    with torch.no_grad():
+        projection.weight.copy_(torch.eye(6, 4)[:6])
+    last_hidden = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    anchor = AnchorRecord(
+        id=1,
+        start_idx=0,
+        end_idx=1,
+        repr=torch.tensor([0.0, 1.0, 0.0, 0.0]),
+        score=0.9,
+        state=AnchorState.CONFIRMED,
+        support=0.9,
+        contradiction_pressure=0.9,
+        viability=0.9,
+        ttl=4.0,
+    )
+    weights = torch.ones(6)
+    weights[1] = 0.0
+    bias, diagnostics = compute_anchor_logits_bias(
+        last_hidden=last_hidden,
+        active_anchors=[anchor],
+        output_projection=projection,
+        conflict_threshold=0.55,
+        bias_scale=1.0,
+        bias_token_weights=weights,
+    )
+    assert diagnostics
+    assert torch.isclose(bias[0, 1], torch.tensor(0.0))
+
+
+def test_build_bias_token_weights_returns_domain_profile() -> None:
+    class _ToyTokenizer:
+        def __call__(self, texts, padding=True, truncation=True, max_length=16, return_tensors="pt", add_special_tokens=False):
+            del padding, truncation, return_tensors, add_special_tokens
+            rows = []
+            for text in texts if isinstance(texts, list) else [texts]:
+                ids = [min(ord(ch), 96) % 97 for ch in str(text)[:max_length]]
+                rows.append(torch.tensor(ids, dtype=torch.long))
+            padded = torch.nn.utils.rnn.pad_sequence(rows, batch_first=True, padding_value=0)
+            mask = (padded != 0).long()
+            return {"input_ids": padded, "attention_mask": mask}
+
+    tokenizer = _ToyTokenizer()
+    weights, diag = build_bias_token_weights(
+        tokenizer=tokenizer,
+        vocab_size=97,
+        device=torch.device("cpu"),
+        prompt="You are a vegan chef. Write a weekly meal plan.",
+    )
+    assert weights is not None
+    assert weights.shape == (97,)
+    assert diag["domain"] == "vegan"
+    assert diag["masked_token_fraction"] >= 0.0
+
+
+def test_get_bias_domain_profile_detects_math_prompt() -> None:
+    profile = get_bias_domain_profile("Prove that sqrt(2)+sqrt(3) is irrational by contradiction.")
+    assert profile.name == "math"
+    assert profile.alpha_multiplier < 0.5
 
 
 def test_compute_normalized_entropy_stays_between_zero_and_one() -> None:

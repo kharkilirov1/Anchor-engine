@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 from typing import Any
+import re
 
 import torch
 
@@ -159,6 +160,23 @@ def analyze_keywords(
         if idx >= 0 and (first_positive is None or idx < first_positive["char_index"]):
             first_positive = {"token": token, "char_index": idx}
     lexical_score = float(sum(positive_hits.values()) - sum(negative_hits.values()))
+    word_tokens = re.findall(r"[a-zA-Z_]+", lowered)
+    bigrams = list(zip(word_tokens, word_tokens[1:]))
+    repeated_bigram_ratio = 0.0
+    if bigrams:
+        repeated_bigram_ratio = 1.0 - (len(set(bigrams)) / max(len(bigrams), 1))
+    sentence_candidates = [
+        sentence.strip()
+        for sentence in re.split(r"[.!?\n]+", lowered)
+        if sentence.strip()
+    ]
+    sentence_counts = {}
+    max_sentence_repeat = 0
+    for sentence in sentence_candidates:
+        sentence_counts[sentence] = sentence_counts.get(sentence, 0) + 1
+        max_sentence_repeat = max(max_sentence_repeat, sentence_counts[sentence])
+    degeneracy_penalty = float(8.0 * repeated_bigram_ratio + 1.5 * max(0, max_sentence_repeat - 1))
+    quality_score = float(lexical_score - degeneracy_penalty - 1.5 * sum(negative_hits.values()))
     return {
         "positive_hits": positive_hits,
         "negative_hits": negative_hits,
@@ -168,6 +186,10 @@ def analyze_keywords(
         "first_positive": first_positive,
         "first_negative": first_negative,
         "lexical_score": lexical_score,
+        "repeated_bigram_ratio": float(repeated_bigram_ratio),
+        "max_sentence_repeat": int(max_sentence_repeat),
+        "degeneracy_penalty": float(degeneracy_penalty),
+        "quality_score": float(quality_score),
     }
 
 
@@ -227,11 +249,15 @@ def build_markdown_report(
         "",
         f"- Base lexical score: `{base_analysis['lexical_score']:.2f}`",
         f"- Anchor lexical score: `{anchor_analysis['lexical_score']:.2f}`",
+        f"- Base quality score: `{base_analysis['quality_score']:.2f}`",
+        f"- Anchor quality score: `{anchor_analysis['quality_score']:.2f}`",
         f"- Base positive hits: `{base_analysis['positive_total']}`",
         f"- Anchor positive hits: `{anchor_analysis['positive_total']}`",
         f"- Base negative hits: `{base_analysis['negative_total']}`",
         f"- Anchor negative hits: `{anchor_analysis['negative_total']}`",
         f"- Anchor protected negative hits: `{sum(anchor_analysis['protected_negative_hits'].values())}`",
+        f"- Base degeneracy penalty: `{base_analysis['degeneracy_penalty']:.2f}`",
+        f"- Anchor degeneracy penalty: `{anchor_analysis['degeneracy_penalty']:.2f}`",
         f"- Anchor bias active steps: `{active_bias_steps}`",
         f"- Continuations identical: `{'yes' if base['continuation_text'] == anchor['continuation_text'] else 'no'}`",
         "",
@@ -408,6 +434,8 @@ def main() -> None:
 
     print(f"base_lexical_score={base_analysis['lexical_score']:.2f}")
     print(f"anchor_lexical_score={anchor_analysis['lexical_score']:.2f}")
+    print(f"base_quality_score={base_analysis['quality_score']:.2f}")
+    print(f"anchor_quality_score={anchor_analysis['quality_score']:.2f}")
     print(
         "anchor_bias_active_steps="
         f"{sum(1 for step in anchor['steps'] if step.get('bias_nonzero_anchors', 0) > 0)}"

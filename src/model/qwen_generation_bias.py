@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 import math
 from typing import Iterable
 
@@ -8,6 +9,138 @@ import torch
 import torch.nn.functional as F
 
 from src.model.anchor_types import AnchorRecord
+
+
+@dataclass(frozen=True)
+class BiasDomainProfile:
+    name: str
+    alpha_multiplier: float
+    pressure_threshold_shift: float
+    rescue_floor_multiplier: float
+    allow_terms: tuple[str, ...]
+    block_terms: tuple[str, ...]
+
+
+_GENERIC_BIAS_TERMS: tuple[str, ...] = (
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "you",
+    "write",
+    "describe",
+    "create",
+    "properties",
+    "theory",
+    "algebra",
+)
+
+_DEFAULT_DOMAIN_PROFILE = BiasDomainProfile(
+    name="default",
+    alpha_multiplier=0.75,
+    pressure_threshold_shift=0.10,
+    rescue_floor_multiplier=0.50,
+    allow_terms=(),
+    block_terms=(),
+)
+_MATH_DOMAIN_PROFILE = BiasDomainProfile(
+    name="math",
+    alpha_multiplier=0.18,
+    pressure_threshold_shift=0.22,
+    rescue_floor_multiplier=0.20,
+    allow_terms=(
+        "assume",
+        "suppose",
+        "rational",
+        "irrational",
+        "contradiction",
+        "therefore",
+        "square",
+        "sqrt",
+        "integer",
+        "coprime",
+        "let",
+        "then",
+    ),
+    block_terms=(
+        "theory",
+        "algebraic",
+        "field",
+        "polynomial",
+        "degree",
+        "complex",
+        "beta",
+        "gamma",
+        "delta",
+    ),
+)
+_CODE_DOMAIN_PROFILE = BiasDomainProfile(
+    name="code",
+    alpha_multiplier=0.90,
+    pressure_threshold_shift=0.04,
+    rescue_floor_multiplier=0.85,
+    allow_terms=(
+        "fastapi",
+        "async",
+        "await",
+        "pydantic",
+        "response_model",
+        "httpexception",
+        "dependency",
+        "depends",
+        "background",
+        "tasks",
+        "request",
+        "response",
+    ),
+    block_terms=(
+        "django",
+        "flask",
+        "template",
+        "jinja",
+        "render",
+        "synchronous",
+        "session",
+        "make_response",
+    ),
+)
+_VEGAN_DOMAIN_PROFILE = BiasDomainProfile(
+    name="vegan",
+    alpha_multiplier=0.32,
+    pressure_threshold_shift=0.12,
+    rescue_floor_multiplier=0.35,
+    allow_terms=(
+        "vegan",
+        "plant",
+        "plant-based",
+        "tofu",
+        "lentil",
+        "lentils",
+        "bean",
+        "beans",
+        "chickpea",
+        "chickpeas",
+        "oat",
+        "almond",
+        "vegetable",
+        "vegetables",
+    ),
+    block_terms=(
+        "vegetarian",
+        "egg",
+        "eggs",
+        "milk",
+        "cheese",
+        "butter",
+        "cream",
+        "salmon",
+        "tuna",
+        "chicken",
+        "beef",
+        "pork",
+    ),
+)
 
 
 def _sanitize_logits(logits: torch.Tensor) -> torch.Tensor:
@@ -18,6 +151,120 @@ def _clamp_unit_interval(value: float, default: float = 0.0) -> float:
     if not math.isfinite(value):
         return float(default)
     return min(1.0, max(0.0, float(value)))
+
+
+def infer_bias_domain(prompt: str) -> str:
+    lowered = prompt.lower()
+    if any(token in lowered for token in ("sqrt", "proof by contradiction", "irrational", "rational")):
+        return "math"
+    if any(token in lowered for token in ("fastapi", "pydantic", "django", "flask", "request handlers")):
+        return "code"
+    if any(token in lowered for token in ("vegan", "meal plan", "plant-based", "chef")):
+        return "vegan"
+    return "default"
+
+
+def get_bias_domain_profile(prompt: str) -> BiasDomainProfile:
+    domain = infer_bias_domain(prompt)
+    if domain == "math":
+        return _MATH_DOMAIN_PROFILE
+    if domain == "code":
+        return _CODE_DOMAIN_PROFILE
+    if domain == "vegan":
+        return _VEGAN_DOMAIN_PROFILE
+    return _DEFAULT_DOMAIN_PROFILE
+
+
+def _extract_token_ids_from_term(
+    tokenizer: object,
+    term: str,
+) -> set[int]:
+    token_ids: set[int] = set()
+    encoded = None
+    try:
+        encoded = tokenizer(term, add_special_tokens=False)
+    except Exception:
+        encoded = None
+    if isinstance(encoded, dict) and "input_ids" in encoded:
+        values = encoded["input_ids"]
+        if isinstance(values, torch.Tensor):
+            token_ids.update(int(token) for token in values.reshape(-1).tolist())
+        elif isinstance(values, list):
+            if values and isinstance(values[0], list):
+                token_ids.update(int(token) for row in values for token in row)
+            else:
+                token_ids.update(int(token) for token in values)
+    elif isinstance(encoded, list):
+        token_ids.update(int(token) for token in encoded)
+
+    if token_ids:
+        return token_ids
+
+    batch_encoded = tokenizer(
+        [term],
+        padding=True,
+        truncation=True,
+        max_length=max(len(term), 4),
+        return_tensors="pt",
+    )
+    ids = batch_encoded.get("input_ids")
+    mask = batch_encoded.get("attention_mask")
+    if isinstance(ids, torch.Tensor):
+        if isinstance(mask, torch.Tensor):
+            active = ids[mask.bool()]
+            token_ids.update(int(token) for token in active.tolist())
+        else:
+            token_ids.update(int(token) for token in ids.reshape(-1).tolist())
+    return token_ids
+
+
+def build_bias_token_weights(
+    tokenizer: object | None,
+    vocab_size: int,
+    device: torch.device,
+    prompt: str,
+) -> tuple[torch.Tensor | None, dict[str, float | str]]:
+    profile = get_bias_domain_profile(prompt)
+    if tokenizer is None:
+        return None, {
+            "domain": profile.name,
+            "alpha_multiplier": float(profile.alpha_multiplier),
+            "pressure_threshold_shift": float(profile.pressure_threshold_shift),
+            "rescue_floor_multiplier": float(profile.rescue_floor_multiplier),
+            "masked_token_fraction": 0.0,
+            "boosted_token_fraction": 0.0,
+        }
+
+    weights = torch.ones(vocab_size, device=device, dtype=torch.float32)
+    generic_ids: set[int] = set()
+    for term in _GENERIC_BIAS_TERMS:
+        generic_ids.update(_extract_token_ids_from_term(tokenizer, term))
+    for token_id in generic_ids:
+        if 0 <= token_id < vocab_size:
+            weights[token_id] = min(float(weights[token_id].item()), 0.05)
+
+    blocked_ids: set[int] = set()
+    for term in profile.block_terms:
+        blocked_ids.update(_extract_token_ids_from_term(tokenizer, term))
+    for token_id in blocked_ids:
+        if 0 <= token_id < vocab_size:
+            weights[token_id] = 0.0
+
+    allow_ids: set[int] = set()
+    for term in profile.allow_terms:
+        allow_ids.update(_extract_token_ids_from_term(tokenizer, term))
+    for token_id in allow_ids:
+        if 0 <= token_id < vocab_size and weights[token_id] > 0.0:
+            weights[token_id] = max(float(weights[token_id].item()), 1.35)
+
+    return weights, {
+        "domain": profile.name,
+        "alpha_multiplier": float(profile.alpha_multiplier),
+        "pressure_threshold_shift": float(profile.pressure_threshold_shift),
+        "rescue_floor_multiplier": float(profile.rescue_floor_multiplier),
+        "masked_token_fraction": float((weights == 0).float().mean().item()),
+        "boosted_token_fraction": float((weights > 1.0).float().mean().item()),
+    }
 
 
 def compute_anchor_generation_gate(
@@ -115,6 +362,7 @@ def compute_anchor_logits_bias(
     output_projection: torch.nn.Module,
     conflict_threshold: float,
     bias_scale: float,
+    bias_token_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, list[dict[str, float]]]:
     if last_hidden.ndim != 2 or last_hidden.size(0) != 1:
         raise ValueError("last_hidden must be shaped [1, hidden_dim]")
@@ -140,6 +388,8 @@ def compute_anchor_logits_bias(
         anchor_logits = output_projection(anchor_repr).squeeze(0)
         anchor_logits = anchor_logits - anchor_logits.mean()
         anchor_logits = anchor_logits / anchor_logits.std().clamp_min(1e-6)
+        if bias_token_weights is not None:
+            anchor_logits = anchor_logits * bias_token_weights.to(device=device, dtype=anchor_logits.dtype)
         scaled = float(bias_scale) * float(gate) * anchor_logits
         bias = scaled if bias is None else bias + scaled
         diagnostics.append(
