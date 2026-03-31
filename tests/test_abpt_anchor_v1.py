@@ -4,6 +4,7 @@ import torch
 
 from src.data.anchor_semantic_cases import make_semantic_anchor_cases
 from src.model.abpt_anchor_v1 import ABPTAnchorV1
+from src.model.anchor_monitor import ContradictionMonitor
 from src.model.anchor_types import AnchorRecord, AnchorState, RevisionDecision
 from src.model.config import TOY_CONFIG
 
@@ -137,6 +138,16 @@ def test_resolve_anchor_regime_root_uses_descendant_alias():
     assert formal_root == 51
 
 
+def test_contradiction_monitor_resolves_descendant_alias_from_span():
+    span = torch.tensor([15, 22, 14], dtype=torch.long)
+
+    root = ContradictionMonitor.resolve_regime_root_from_span(span)
+    inferred = ContradictionMonitor.infer_reference_root(span)
+
+    assert root == 21
+    assert inferred == 21
+
+
 def test_alternative_reading_can_activate_on_proof_mode_flip():
     cfg = replace(TOY_CONFIG)
     model = ABPTAnchorV1(cfg)
@@ -224,6 +235,31 @@ def test_alternative_reading_keeps_baseline_for_stable_regime():
     proposal = model._propose_alternative_reading(seq_hidden, case.input_ids, anchor)
 
     assert proposal["proposal_type"] == "start_state_baseline"
+
+
+def test_alternative_reading_can_use_soft_regime_fallback_for_open_vocab():
+    cfg = replace(TOY_CONFIG)
+    model = ABPTAnchorV1(cfg)
+    seq_ids = torch.tensor([70, 71, 70, 72, 80, 81, 80, 81, 80, 81], dtype=torch.long)
+    seq_hidden = torch.randn(seq_ids.size(0), cfg.d_model)
+    anchor = AnchorRecord(
+        id=12,
+        start_idx=0,
+        end_idx=2,
+        repr=seq_hidden[0],
+        score=0.8,
+        state=AnchorState.PROVISIONAL,
+        support=0.8,
+        contradiction_pressure=0.9,
+        viability=0.4,
+        ttl=4.0,
+    )
+
+    proposal = model._propose_alternative_reading(seq_hidden, seq_ids, anchor)
+
+    assert proposal["proposal_type"] == "regime_shift_window"
+    assert proposal["proposal_root_token"] in {80, 81}
+    assert proposal["proposal_score"] > 0.24
 
 
 def test_anchor_context_can_soft_blend_alternative_proposal():

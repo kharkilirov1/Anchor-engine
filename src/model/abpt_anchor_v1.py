@@ -14,24 +14,6 @@ from src.model.config import ModelConfig
 
 
 class ABPTAnchorV1(nn.Module):
-    _ANCHOR_REGIME_ALIAS: dict[int, int] = {
-        11: 11,
-        13: 11,
-        16: 11,
-        21: 21,
-        22: 21,
-        23: 21,
-        31: 31,
-        32: 31,
-        33: 31,
-        41: 41,
-        42: 41,
-        43: 41,
-        44: 41,
-        51: 51,
-        52: 51,
-        53: 51,
-    }
     _PROPOSAL_GATE_MULTIPLIER: dict[int, float] = {
         12: 1.10,
         24: 1.35,
@@ -260,12 +242,9 @@ class ABPTAnchorV1(nn.Module):
         span_start = max(int(anchor.start_idx), 0)
         span_end = min(int(anchor.end_idx), seq_ids.size(0) - 1)
         span_len = max(span_end - span_start + 1, 1)
+        anchor_span = seq_ids[span_start: span_end + 1]
         root_token = self._resolve_anchor_regime_root(seq_ids, span_start, span_end)
-        if root_token is None:
-            return baseline
         allowed_tokens = self.contradiction_monitor._REGIME_COMPATIBILITY.get(root_token)
-        if allowed_tokens is None:
-            return baseline
 
         start = min(span_end + 1, seq_ids.size(0))
         horizon = max(int(float(anchor.ttl) * 4), span_len * 4)
@@ -278,17 +257,22 @@ class ABPTAnchorV1(nn.Module):
         best_root_token: int | None = None
         for offset in range(start, stop - span_len + 1):
             window_tokens = seq_ids[offset: offset + span_len]
-            regime_compatibility = sum(int(int(token.item()) in allowed_tokens) for token in window_tokens) / max(span_len, 1)
+            regime_compatibility = self.contradiction_monitor.regime_compatibility_score(
+                window_tokens=window_tokens,
+                anchor_span=anchor_span,
+                root_token=root_token,
+            )
             conflict_strength = 1.0 - regime_compatibility
             if conflict_strength < 0.45:
                 continue
 
             unique_tokens, counts = torch.unique(window_tokens, return_counts=True)
             dominant_ratio = float(counts.max().item()) / max(span_len, 1)
-            incompatible_mask = torch.tensor(
-                [int(token.item()) not in allowed_tokens for token in unique_tokens],
-                device=unique_tokens.device,
-                dtype=torch.bool,
+            incompatible_mask = self._proposal_incompatible_mask(
+                unique_tokens=unique_tokens,
+                anchor_span=anchor_span,
+                root_token=root_token,
+                allowed_tokens=allowed_tokens,
             )
             if incompatible_mask.any():
                 incompatible_tokens = unique_tokens[incompatible_mask]
@@ -305,7 +289,10 @@ class ABPTAnchorV1(nn.Module):
             root_replacement_plausibility = 0.55 * candidate_root_ratio + 0.45 * future_support
             leading_shift_bonus = 0.0
             first_token = int(window_tokens[0].item())
-            if first_token not in allowed_tokens:
+            if allowed_tokens is None:
+                if first_token not in {int(token) for token in anchor_span.tolist()}:
+                    leading_shift_bonus = min(1.0, 0.5 + float((future_tail == first_token).float().mean().item()))
+            elif first_token not in allowed_tokens:
                 leading_shift_bonus = min(1.0, 0.5 + float((future_tail == first_token).float().mean().item()))
             coherence = (
                 0.25 * dominant_ratio
@@ -392,18 +379,31 @@ class ABPTAnchorV1(nn.Module):
         span_start: int,
         span_end: int,
     ) -> int | None:
-        span_tokens = seq_ids[span_start: span_end + 1].tolist()
-        for token in span_tokens:
-            root = cls._ANCHOR_REGIME_ALIAS.get(int(token))
-            if root is not None:
-                return root
-        return None
+        return ContradictionMonitor.infer_reference_root(seq_ids[span_start: span_end + 1])
 
     @classmethod
     def _proposal_root_prior(cls, root_token: int | None) -> float:
         if root_token is None:
             return 1.0
         return cls._PROPOSAL_ROOT_PRIOR.get(int(root_token), 1.0)
+
+    @staticmethod
+    def _proposal_incompatible_mask(
+        unique_tokens: torch.Tensor,
+        anchor_span: torch.Tensor,
+        root_token: int | None,
+        allowed_tokens: set[int] | None,
+    ) -> torch.Tensor:
+        anchor_token_set = {int(token) for token in anchor_span.tolist()}
+        incompatible: list[bool] = []
+        for token in unique_tokens.tolist():
+            token = int(token)
+            token_alias = ContradictionMonitor._REGIME_ROOT_ALIAS.get(token)
+            if allowed_tokens is not None:
+                incompatible.append(token not in allowed_tokens and token_alias != root_token)
+            else:
+                incompatible.append(token not in anchor_token_set and token_alias != root_token)
+        return torch.tensor(incompatible, device=unique_tokens.device, dtype=torch.bool)
 
     @staticmethod
     def _anchor_local_proposal_prior(anchor, root_token: int | None) -> float:

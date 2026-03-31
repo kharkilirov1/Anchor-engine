@@ -9,6 +9,24 @@ from src.model.config import ModelConfig
 
 
 class ContradictionMonitor(nn.Module):
+    _REGIME_ROOT_ALIAS: dict[int, int] = {
+        11: 11,
+        13: 11,
+        16: 11,
+        21: 21,
+        22: 21,
+        23: 21,
+        31: 31,
+        32: 31,
+        33: 31,
+        41: 41,
+        42: 41,
+        43: 41,
+        44: 41,
+        51: 51,
+        52: 51,
+        53: 51,
+    }
     _REGIME_COMPATIBILITY: dict[int, set[int]] = {
         11: {11, 13, 16},
         21: {14, 15, 21, 22, 23},
@@ -118,22 +136,25 @@ class ContradictionMonitor(nn.Module):
             return 1.0, 0.0, 0.0
 
         sims: list[float] = []
-        root_token = int(anchor_span[0].item())
+        root_token = ContradictionMonitor.infer_reference_root(anchor_span)
         root_hits = []
         regime_hits = []
         pos_weights = torch.linspace(1.0, 0.4, steps=span_len, device=anchor_span.device)
         pos_weights = pos_weights / pos_weights.sum()
-        allowed_tokens = ContradictionMonitor._REGIME_COMPATIBILITY.get(root_token)
         for offset in range(0, future_tokens.numel() - span_len + 1):
             window = future_tokens[offset: offset + span_len]
             exact_match = float((window == anchor_span).float().mean().item())
             overlap = len(set(window.tolist()) & set(anchor_span.tolist())) / max(len(set(anchor_span.tolist())), 1)
-            root_persistence = float((window == root_token).float().mean().item())
-            positional_match = float(((window == anchor_span).float() * pos_weights).sum().item())
-            if allowed_tokens is None:
-                regime_compatibility = overlap
+            if root_token is None:
+                root_persistence = overlap
             else:
-                regime_compatibility = sum(int(int(token.item()) in allowed_tokens) for token in window) / max(span_len, 1)
+                root_persistence = float((window == root_token).float().mean().item())
+            positional_match = float(((window == anchor_span).float() * pos_weights).sum().item())
+            regime_compatibility = ContradictionMonitor.regime_compatibility_score(
+                window_tokens=window,
+                anchor_span=anchor_span,
+                root_token=root_token,
+            )
             similarity = (
                 0.25 * exact_match
                 + 0.15 * overlap
@@ -149,13 +170,88 @@ class ContradictionMonitor(nn.Module):
         mean_regime_compatibility = sum(regime_hits) / max(len(regime_hits), 1)
         descendant_mass = sum(sim >= 0.6 for sim in sims) / max(len(sims), 1)
         descendant_coherence = (
-            0.55 * (sum(sims) / max(len(sims), 1))
-            + 0.15 * mean_root_persistence
-            + 0.30 * mean_regime_compatibility
+            0.60 * (sum(sims) / max(len(sims), 1))
+            + 0.25 * mean_root_persistence
+            + 0.15 * mean_regime_compatibility
         )
         pattern_contradiction = 1.0 - (
             0.60 * best_similarity
-            + 0.10 * mean_root_persistence
-            + 0.30 * mean_regime_compatibility
+            + 0.20 * mean_root_persistence
+            + 0.20 * mean_regime_compatibility
         )
         return pattern_contradiction, float(descendant_mass), float(descendant_coherence)
+
+    @classmethod
+    def resolve_regime_root_from_ids(
+        cls,
+        seq_ids: torch.Tensor,
+        span_start: int,
+        span_end: int,
+    ) -> int | None:
+        span_tokens = seq_ids[span_start: span_end + 1]
+        return cls.resolve_regime_root_from_span(span_tokens)
+
+    @classmethod
+    def resolve_regime_root_from_span(
+        cls,
+        span_tokens: torch.Tensor,
+    ) -> int | None:
+        for token in span_tokens.tolist():
+            root = cls._REGIME_ROOT_ALIAS.get(int(token))
+            if root is not None:
+                return root
+        return None
+
+    @classmethod
+    def infer_reference_root(
+        cls,
+        span_tokens: torch.Tensor,
+    ) -> int | None:
+        root = cls.resolve_regime_root_from_span(span_tokens)
+        if root is not None:
+            return root
+        if span_tokens.numel() == 0:
+            return None
+        unique_tokens, counts = torch.unique(span_tokens, return_counts=True)
+        return int(unique_tokens[torch.argmax(counts)].item())
+
+    @classmethod
+    def regime_compatibility_score(
+        cls,
+        window_tokens: torch.Tensor,
+        anchor_span: torch.Tensor,
+        root_token: int | None,
+    ) -> float:
+        if window_tokens.numel() == 0:
+            return 0.0
+
+        window_list = [int(token) for token in window_tokens.tolist()]
+        anchor_token_set = {int(token) for token in anchor_span.tolist()}
+        overlap = len(set(window_list) & anchor_token_set) / max(len(anchor_token_set), 1)
+        exact_match = float((window_tokens == anchor_span).float().mean().item())
+
+        if root_token is None:
+            root_persistence = overlap
+            alias_compatibility = 0.0
+        else:
+            root_persistence = sum(token == root_token for token in window_list) / max(len(window_list), 1)
+            alias_compatibility = sum(
+                cls._REGIME_ROOT_ALIAS.get(token) == root_token for token in window_list
+            ) / max(len(window_list), 1)
+
+        allowed_tokens = cls._REGIME_COMPATIBILITY.get(root_token) if root_token is not None else None
+        if allowed_tokens is None:
+            return float(
+                0.45 * exact_match
+                + 0.30 * overlap
+                + 0.10 * alias_compatibility
+                + 0.15 * root_persistence
+            )
+
+        hard_compatibility = sum(token in allowed_tokens for token in window_list) / max(len(window_list), 1)
+        return float(
+            0.55 * hard_compatibility
+            + 0.20 * overlap
+            + 0.15 * alias_compatibility
+            + 0.10 * root_persistence
+        )
