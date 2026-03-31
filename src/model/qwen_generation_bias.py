@@ -10,6 +10,16 @@ import torch.nn.functional as F
 from src.model.anchor_types import AnchorRecord
 
 
+def _sanitize_logits(logits: torch.Tensor) -> torch.Tensor:
+    return torch.nan_to_num(logits, nan=0.0, posinf=1e4, neginf=-1e4)
+
+
+def _clamp_unit_interval(value: float, default: float = 0.0) -> float:
+    if not math.isfinite(value):
+        return float(default)
+    return min(1.0, max(0.0, float(value)))
+
+
 def compute_anchor_generation_gate(
     similarity: float,
     support: float,
@@ -30,20 +40,38 @@ def compute_normalized_entropy(
     logits: torch.Tensor,
     top_k: int | None = None,
 ) -> torch.Tensor:
+    return compute_entropy_stats(logits, top_k=top_k)["normalized_entropy"]
+
+
+def compute_entropy_stats(
+    logits: torch.Tensor,
+    top_k: int | None = None,
+) -> dict[str, torch.Tensor]:
     if logits.ndim != 2:
         raise ValueError("logits must be shaped [batch, vocab_size]")
+    safe_logits = _sanitize_logits(logits)
     if top_k is not None:
-        top_k = max(1, min(int(top_k), int(logits.size(-1))))
+        top_k = max(1, min(int(top_k), int(safe_logits.size(-1))))
         if top_k == 1:
-            return torch.zeros(logits.size(0), device=logits.device, dtype=logits.dtype)
-        logits = torch.topk(logits, k=top_k, dim=-1).values
+            zero = torch.zeros(safe_logits.size(0), device=safe_logits.device, dtype=safe_logits.dtype)
+            return {
+                "raw_entropy": zero,
+                "normalized_entropy": zero,
+            }
+        safe_logits = torch.topk(safe_logits, k=top_k, dim=-1).values
         norm_value = math.log(float(top_k))
     else:
-        norm_value = math.log(float(logits.size(-1)))
-    probs = F.softmax(logits, dim=-1)
-    entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=-1)
-    norm = torch.tensor(norm_value, device=logits.device, dtype=logits.dtype).clamp_min(1e-12)
-    return entropy / norm
+        norm_value = math.log(float(safe_logits.size(-1)))
+    probs = F.softmax(safe_logits, dim=-1)
+    probs = torch.nan_to_num(probs, nan=0.0, posinf=1.0, neginf=0.0).clamp_min(1e-12)
+    entropy = -(probs * probs.log()).sum(dim=-1)
+    entropy = torch.nan_to_num(entropy, nan=0.0, posinf=0.0, neginf=0.0)
+    norm = torch.tensor(norm_value, device=safe_logits.device, dtype=safe_logits.dtype).clamp_min(1e-12)
+    normalized = torch.nan_to_num(entropy / norm, nan=0.0, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+    return {
+        "raw_entropy": entropy,
+        "normalized_entropy": normalized,
+    }
 
 
 def compute_entropy_conflict_bias_scale(
@@ -56,18 +84,28 @@ def compute_entropy_conflict_bias_scale(
     pressure_slope: float,
     pressure_rescue_floor: float,
 ) -> dict[str, float]:
+    entropy_input_isfinite = math.isfinite(float(normalized_entropy))
+    pressure_input_isfinite = math.isfinite(float(contradiction_pressure))
+    safe_entropy = _clamp_unit_interval(float(normalized_entropy), default=0.0)
+    safe_pressure = _clamp_unit_interval(float(contradiction_pressure), default=0.0)
     entropy_gate = torch.sigmoid(
-        torch.tensor((float(normalized_entropy) - float(entropy_threshold)) / max(float(entropy_slope), 1e-6))
+        torch.tensor((safe_entropy - float(entropy_threshold)) / max(float(entropy_slope), 1e-6))
     ).item()
     pressure_gate = torch.sigmoid(
-        torch.tensor((float(contradiction_pressure) - float(pressure_threshold)) / max(float(pressure_slope), 1e-6))
+        torch.tensor((safe_pressure - float(pressure_threshold)) / max(float(pressure_slope), 1e-6))
     ).item()
     rescue_floor = min(1.0, max(0.0, float(pressure_rescue_floor)))
     alpha_t = float(alpha_max) * float(pressure_gate) * (rescue_floor + (1.0 - rescue_floor) * float(entropy_gate))
+    alpha_t = float(_clamp_unit_interval(alpha_t / max(float(alpha_max), 1e-6), default=0.0) * max(float(alpha_max), 0.0))
     return {
         "alpha_t": float(alpha_t),
         "entropy_gate": float(entropy_gate),
         "pressure_gate": float(pressure_gate),
+        "safe_normalized_entropy": float(safe_entropy),
+        "safe_contradiction_pressure": float(safe_pressure),
+        "entropy_input_isfinite": float(entropy_input_isfinite),
+        "pressure_input_isfinite": float(pressure_input_isfinite),
+        "alpha_isfinite": float(math.isfinite(alpha_t)),
     }
 
 

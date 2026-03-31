@@ -22,7 +22,7 @@ from src.model.qwen_generation_bias import (
     apply_repetition_penalty,
     compute_entropy_conflict_bias_scale,
     compute_anchor_logits_bias,
-    compute_normalized_entropy,
+    compute_entropy_stats,
 )
 from src.model.future_span_hints import (
     build_auxiliary_future_proposals,
@@ -77,6 +77,37 @@ class QwenAnchorOverlay(nn.Module):
         self.viability_tracker = ViabilityTracker(anchor_cfg)
         self.revision_controller = RevisionController(anchor_cfg)
         self.future_influence_scorer = FutureInfluenceScorer()
+
+    def _summarize_top_biased_tokens(
+        self,
+        bias: torch.Tensor,
+        *,
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]:
+        if bias.ndim != 2 or bias.size(0) != 1:
+            return []
+        if not torch.isfinite(bias).all():
+            return []
+        flat_bias = bias[0]
+        if flat_bias.numel() == 0:
+            return []
+        count = min(int(top_k), int(flat_bias.numel()))
+        values, indices = torch.topk(flat_bias.abs(), k=count, dim=-1)
+        out: list[dict[str, Any]] = []
+        for rank, (idx, mag) in enumerate(zip(indices.tolist(), values.tolist()), start=1):
+            token_id = int(idx)
+            out.append(
+                {
+                    "rank": rank,
+                    "token_id": token_id,
+                    "token_text": self.tokenizer.decode([token_id], skip_special_tokens=False)
+                    if self.tokenizer is not None
+                    else str(token_id),
+                    "bias_value": float(flat_bias[token_id].item()),
+                    "bias_abs": float(mag),
+                }
+            )
+        return out
 
     @classmethod
     def from_pretrained(
@@ -602,7 +633,7 @@ class QwenAnchorOverlay(nn.Module):
             )
             hidden = outputs.hidden_states[-1]
             next_hidden = hidden[:, -1, :]
-            next_logits = outputs.logits[:, -1, :]
+            next_logits = torch.nan_to_num(outputs.logits[:, -1, :], nan=0.0, posinf=1e4, neginf=-1e4)
 
             detector_out, anchors, contradiction_out, viability_out = self._prepare_anchor_state(
                 hidden=hidden,
@@ -621,7 +652,9 @@ class QwenAnchorOverlay(nn.Module):
                 if min_bias_pressure is not None
                 else (0.60 if pressure_threshold is None else float(pressure_threshold))
             )
-            normalized_entropy = float(compute_normalized_entropy(next_logits, top_k=entropy_top_k).item())
+            entropy_stats = compute_entropy_stats(next_logits, top_k=entropy_top_k)
+            raw_entropy = float(entropy_stats["raw_entropy"].item())
+            normalized_entropy = float(entropy_stats["normalized_entropy"].item())
             alpha_diag = compute_entropy_conflict_bias_scale(
                 normalized_entropy=normalized_entropy,
                 contradiction_pressure=mean_pressure,
@@ -651,7 +684,11 @@ class QwenAnchorOverlay(nn.Module):
 
             effective_scale = float(alpha_diag["alpha_t"])
             anchor_bias = raw_anchor_bias * effective_scale
+            raw_bias_norm = float(torch.nan_to_num(raw_anchor_bias.norm(), nan=0.0, posinf=0.0, neginf=0.0).item())
+            anchor_bias_norm = float(torch.nan_to_num(anchor_bias.norm(), nan=0.0, posinf=0.0, neginf=0.0).item())
+            top_biased_tokens = self._summarize_top_biased_tokens(anchor_bias)
             adjusted_logits = next_logits + anchor_bias.to(next_logits.dtype)
+            adjusted_logits = torch.nan_to_num(adjusted_logits, nan=0.0, posinf=1e4, neginf=-1e4)
             adjusted_logits = apply_repetition_penalty(
                 logits=adjusted_logits,
                 generated_ids=generated,
@@ -696,9 +733,18 @@ class QwenAnchorOverlay(nn.Module):
                     "bias_nonzero_anchors": len(bias_diag),
                     "bias_gate_sum": gate_sum,
                     "effective_bias_scale": float(effective_scale),
+                    "raw_entropy": float(raw_entropy),
                     "normalized_entropy": float(normalized_entropy),
+                    "raw_contradiction_pressure": float(mean_pressure),
                     "entropy_gate": float(alpha_diag["entropy_gate"]),
                     "pressure_gate": float(alpha_diag["pressure_gate"]),
+                    "entropy_input_isfinite": bool(alpha_diag["entropy_input_isfinite"]),
+                    "pressure_input_isfinite": bool(alpha_diag["pressure_input_isfinite"]),
+                    "alpha_isfinite": bool(alpha_diag["alpha_isfinite"]),
+                    "raw_anchor_bias_norm": float(raw_bias_norm),
+                    "anchor_bias_norm": float(anchor_bias_norm),
+                    "bias_isfinite": bool(torch.isfinite(anchor_bias).all().item()),
+                    "top_biased_tokens": top_biased_tokens,
                     "blocked_ngram_token_count": int(len(blocked_tokens)),
                     "bias_applied": bool(bias_diag) and effective_scale > 0.0,
                 }

@@ -105,6 +105,15 @@ def test_compute_normalized_entropy_can_use_top_k_slice() -> None:
     assert float(entropy_top2.item()) <= 1.0 + 1e-6
 
 
+def test_compute_normalized_entropy_sanitizes_non_finite_logits() -> None:
+    logits = torch.tensor([[float("nan"), 0.0, float("inf"), float("-inf")]], dtype=torch.float32)
+
+    entropy = compute_normalized_entropy(logits, top_k=3)
+
+    assert torch.isfinite(entropy).all()
+    assert 0.0 <= float(entropy.item()) <= 1.0 + 1e-6
+
+
 def test_compute_entropy_conflict_bias_scale_requires_uncertainty_and_pressure() -> None:
     low = compute_entropy_conflict_bias_scale(
         normalized_entropy=0.10,
@@ -146,6 +155,25 @@ def test_compute_entropy_conflict_bias_scale_keeps_pressure_floor_when_entropy_l
 
     assert low_entropy_high_pressure["pressure_gate"] > 0.9
     assert low_entropy_high_pressure["alpha_t"] > 0.0
+
+
+def test_compute_entropy_conflict_bias_scale_sanitizes_non_finite_inputs() -> None:
+    diag = compute_entropy_conflict_bias_scale(
+        normalized_entropy=float("nan"),
+        contradiction_pressure=float("nan"),
+        alpha_max=1.5,
+        entropy_threshold=0.35,
+        pressure_threshold=0.60,
+        entropy_slope=0.08,
+        pressure_slope=0.08,
+        pressure_rescue_floor=0.20,
+    )
+
+    assert diag["entropy_input_isfinite"] == 0.0
+    assert diag["pressure_input_isfinite"] == 0.0
+    assert diag["alpha_isfinite"] == 1.0
+    assert diag["alpha_t"] >= 0.0
+    assert torch.isfinite(torch.tensor(diag["alpha_t"]))
 
 
 def test_apply_repetition_penalty_downweights_seen_positive_logits() -> None:
