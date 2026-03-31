@@ -16,6 +16,7 @@ from src.model.future_span_hints import (
     summarize_auxiliary_proposals,
 )
 from src.model.anchor_types import AnchorRecord, AnchorState
+from src.model.anchor_tree_types import ProposalRepairDiagnostics
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from scripts.calibrate_qwen_anchor_thresholds import pairwise_family_metrics, score_configuration
 from scripts.analyze_qwen_span_misses import build_analysis, classify_family
@@ -699,6 +700,7 @@ def test_qwen_overlay_emits_future_hint_batches():
     assert out["observed_tree_batches"][0]["observed_tree"].source_kind == "observed"
     assert "observed_tree_graph_diagnostics" in out
     assert "proposal_repair" in out["observed_tree_batches"][0]
+    assert "mean_repair_gain" in out["auxiliary_revision_diagnostics"]
 
 
 def test_auxiliary_arbiter_uses_one_to_one_matching():
@@ -751,6 +753,69 @@ def test_auxiliary_arbiter_uses_one_to_one_matching():
 
     assert len(arbiter) == 1
     assert summaries[0]["matched_anchor_count"] == 1
+
+
+def test_auxiliary_arbiter_uses_repair_gain_to_rank_matches():
+    model = _DummyCausalLM()
+    tokenizer = _DummyTokenizer()
+    overlay = QwenAnchorOverlay(base_model=model, cfg=TOY_CONFIG, tokenizer=tokenizer)
+    anchors = [[
+        AnchorRecord(
+            id=1,
+            start_idx=0,
+            end_idx=2,
+            repr=torch.ones(4),
+            score=0.8,
+            state=AnchorState.CANDIDATE,
+            support=0.8,
+            contradiction_pressure=0.9,
+            viability=0.6,
+            ttl=4.0,
+            descendant_mass=0.0,
+            descendant_coherence=0.0,
+        )
+    ]]
+    proposals = [[
+        {
+            "proposal_type": "future_hint_span",
+            "proposal_score": 0.7,
+            "proposal_span": (4, 5),
+            "proposal_root_token": 7,
+            "proposal_text": "good repair",
+        },
+        {
+            "proposal_type": "future_hint_span",
+            "proposal_score": 0.95,
+            "proposal_span": (4, 5),
+            "proposal_root_token": 8,
+            "proposal_text": "bad repair",
+        },
+    ]]
+    repair_batches = [[
+        ProposalRepairDiagnostics(
+            proposal_node_id="repair_0",
+            proposal_label="simplify_result",
+            repair_gain=0.8,
+            coverage_delta=0.2,
+            spurious_delta=-0.1,
+            alignment_delta=0.3,
+            notes={"proposal_text": "good repair"},
+        ),
+        ProposalRepairDiagnostics(
+            proposal_node_id="repair_1",
+            proposal_label="shortcut_lookup",
+            repair_gain=-0.3,
+            coverage_delta=-0.1,
+            spurious_delta=0.2,
+            alignment_delta=-0.2,
+            notes={"proposal_text": "bad repair"},
+        ),
+    ]]
+
+    arbiter, summaries = overlay._build_auxiliary_arbiter(anchors, proposals, repair_batches)
+
+    assert arbiter[1]["proposal_text"] == "good repair"
+    assert summaries[0]["mean_repair_gain"] > 0
 
 
 def test_auxiliary_match_gate_uses_sublinear_distance_penalty():

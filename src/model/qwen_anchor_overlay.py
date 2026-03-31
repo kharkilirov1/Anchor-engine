@@ -11,6 +11,7 @@ from src.model.anchor_detector import AnchorDetector
 from src.model.anchor_memory import AnchorMemory
 from src.model.anchor_monitor import ContradictionMonitor
 from src.model.anchor_types import AnchorRecord, RevisionDecision
+from src.model.anchor_tree_types import ProposalRepairDiagnostics
 from src.model.anchor_revision import RevisionController
 from src.model.anchor_viability import ViabilityTracker
 from src.model.config import ModelConfig, TOY_CONFIG
@@ -233,28 +234,40 @@ class QwenAnchorOverlay(nn.Module):
         self,
         anchors: list[list[AnchorRecord]],
         auxiliary_proposal_batches: list[list[dict[str, Any]]],
+        proposal_repair_batches: list[list[ProposalRepairDiagnostics]] | None = None,
     ) -> tuple[dict[int, dict[str, Any]], list[dict[str, Any]]]:
         arbiter: dict[int, dict[str, Any]] = {}
         batch_summaries: list[dict[str, Any]] = []
-        for batch_anchors, proposals in zip(anchors, auxiliary_proposal_batches):
+        repair_batches = proposal_repair_batches or [[] for _ in auxiliary_proposal_batches]
+        for batch_anchors, proposals, repair_diagnostics in zip(anchors, auxiliary_proposal_batches, repair_batches):
             matches = 0
             alt_prob_sum = 0.0
             score_sum = 0.0
-            candidate_edges: list[tuple[float, AnchorRecord, dict[str, Any]]] = []
+            repair_gain_sum = 0.0
+            repair_map = {
+                str(item.notes.get("proposal_text", "")): item
+                for item in repair_diagnostics
+            }
+            candidate_edges: list[tuple[float, AnchorRecord, dict[str, Any], float]] = []
             for anchor in batch_anchors:
                 for proposal in proposals:
                     start, end = proposal["proposal_span"]
                     if start <= int(anchor.end_idx):
                         continue
-                    gate = self._auxiliary_match_gate(anchor=anchor, proposal=proposal)
+                    repair_item = repair_map.get(str(proposal.get("proposal_text", "")))
+                    repair_gain = 0.0 if repair_item is None else float(repair_item.repair_gain)
+                    proposal_with_repair = dict(proposal)
+                    if repair_item is not None:
+                        proposal_with_repair["repair_gain"] = repair_gain
+                    gate = self._auxiliary_match_gate(anchor=anchor, proposal=proposal_with_repair)
                     if gate <= 0.20:
                         continue
-                    candidate_edges.append((gate, anchor, proposal))
+                    candidate_edges.append((gate, anchor, proposal_with_repair, repair_gain))
 
             candidate_edges.sort(key=lambda item: item[0], reverse=True)
             used_anchor_ids: set[int] = set()
             used_proposal_spans: set[tuple[int, int]] = set()
-            for gate, anchor, best_match in candidate_edges:
+            for gate, anchor, best_match, repair_gain in candidate_edges:
                 proposal_span = tuple(int(x) for x in best_match["proposal_span"])
                 if anchor.id in used_anchor_ids or proposal_span in used_proposal_spans:
                     continue
@@ -270,15 +283,18 @@ class QwenAnchorOverlay(nn.Module):
                     "proposal_span": proposal_span,
                     "proposal_text": best_match.get("proposal_text"),
                     "distance_from_anchor": int(proposal_span[0]) - int(anchor.end_idx),
+                    "repair_gain": float(repair_gain),
                 }
                 matches += 1
                 alt_prob_sum += alt_prob
                 score_sum += float(best_match.get("proposal_score", 0.0))
+                repair_gain_sum += float(repair_gain)
             batch_summaries.append(
                 {
                     "matched_anchor_count": matches,
                     "mean_alt_prob": alt_prob_sum / max(matches, 1),
                     "mean_matched_proposal_score": score_sum / max(matches, 1),
+                    "mean_repair_gain": repair_gain_sum / max(matches, 1),
                 }
             )
         return arbiter, batch_summaries
@@ -289,11 +305,13 @@ class QwenAnchorOverlay(nn.Module):
         distance = max(1, start - int(anchor.end_idx))
         distance_penalty = 1.0 / float(distance) ** 0.5
         proposal_score = float(proposal.get("proposal_score", 0.0))
+        repair_gain = float(proposal.get("repair_gain", 0.0))
         pressure = float(anchor.contradiction_pressure)
         viability = float(anchor.viability)
         pressure_factor = 0.20 + 0.80 * pressure
         viability_factor = 0.55 + 0.45 * viability
-        return proposal_score * distance_penalty * pressure_factor * viability_factor
+        repair_factor = 1.0 if "repair_gain" not in proposal else min(2.0, max(0.05, 0.5 + repair_gain))
+        return proposal_score * distance_penalty * pressure_factor * viability_factor * repair_factor
 
     @staticmethod
     def _summarize_auxiliary_revision(
@@ -309,6 +327,7 @@ class QwenAnchorOverlay(nn.Module):
         matched_scores = [
             item["mean_matched_proposal_score"] for item in batch_summaries if item["matched_anchor_count"] > 0
         ]
+        repair_gains = [item["mean_repair_gain"] for item in batch_summaries if item["matched_anchor_count"] > 0]
         base_revise = _count(base_events, "revise")
         auxiliary_revise = _count(auxiliary_events, "revise")
         base_retire = _count(base_events, "retire")
@@ -320,6 +339,7 @@ class QwenAnchorOverlay(nn.Module):
             "mean_matched_proposal_score": (
                 float(sum(matched_scores) / max(len(matched_scores), 1)) if matched_scores else 0.0
             ),
+            "mean_repair_gain": float(sum(repair_gains) / max(len(repair_gains), 1)) if repair_gains else 0.0,
             "base_revise_count": int(base_revise),
             "auxiliary_revise_count": int(auxiliary_revise),
             "auxiliary_revise_gain": int(auxiliary_revise - base_revise),
@@ -512,6 +532,7 @@ class QwenAnchorOverlay(nn.Module):
         auxiliary_arbiter, auxiliary_batch_summaries = self._build_auxiliary_arbiter(
             anchors=self._clone_anchor_batches(out["_pre_revision_anchors"]),
             auxiliary_proposal_batches=auxiliary_proposal_batches,
+            proposal_repair_batches=[batch_item["proposal_repair"] for batch_item in observed_tree_batches],
         )
         auxiliary_revised_anchors, auxiliary_revision_events, auxiliary_anchor_diagnostics = self._apply_revision_path(
             anchors=self._clone_anchor_batches(out["_pre_revision_anchors"]),
