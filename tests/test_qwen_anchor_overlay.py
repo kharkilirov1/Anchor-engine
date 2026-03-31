@@ -196,6 +196,8 @@ def test_qwen_overlay_can_analyze_hidden_batch_directly():
 
     assert "anchor_diagnostics" in out
     assert "proposal_diagnostics" in out
+    assert "dependency_graph" in out
+    assert "dependency_graph_pressure" in out["anchor_diagnostics"]
 
 
 def test_qwen_calibration_scoring_prefers_family_separation():
@@ -253,6 +255,61 @@ def test_future_influence_scorer_returns_token_scores():
     assert out["scores"].shape == input_ids.shape
     assert out["target_window"] == 3
     assert out["loss"] >= 0.0
+
+
+def test_generate_with_anchor_bias_logs_dependency_pressure(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = _DummyCausalLM()
+    tokenizer = _DummyTokenizer()
+    overlay = QwenAnchorOverlay(base_model=model, cfg=replace(TOY_CONFIG, anchor_threshold=0.10), tokenizer=tokenizer)
+
+    fake_anchor = AnchorRecord(
+        id=1,
+        start_idx=0,
+        end_idx=1,
+        repr=torch.tensor([0.0] * model.config.hidden_size, dtype=torch.float32),
+        score=0.9,
+        state=AnchorState.CONFIRMED,
+        support=0.9,
+        contradiction_pressure=0.9,
+        viability=0.8,
+        ttl=4.0,
+        descendant_mass=0.0,
+        descendant_coherence=0.0,
+    )
+
+    def _fake_prepare_anchor_state(hidden, input_ids, attention_mask=None):
+        del hidden, input_ids, attention_mask
+        return {}, [[fake_anchor]], {"contradiction_pressure": torch.tensor([[0.9]])}, {"viability": torch.tensor([[0.8]])}
+
+    def _fake_apply_revision_path(anchors, viability_out, arbiter):
+        del viability_out, arbiter
+        return anchors, [], {"mean_contradiction_pressure": 0.9, "num_active": 1, "mean_viability": 0.8, "dead_end_count": 0}
+
+    def _fake_dependency_graph(**kwargs):
+        del kwargs
+        return {
+            "edges": [{"source_id": 1, "target_id": 2}],
+            "nodes": [],
+            "graph_pressure": 0.2,
+            "current_graph_pressure": 0.2,
+            "current_anchor_id": 1,
+            "edge_count": 1,
+            "broken_anchor_count": 0,
+            "mean_validity": 0.9,
+        }
+
+    monkeypatch.setattr(overlay, "_prepare_anchor_state", _fake_prepare_anchor_state)
+    monkeypatch.setattr(overlay, "_apply_revision_path", _fake_apply_revision_path)
+    monkeypatch.setattr(overlay, "_compute_dependency_graph", _fake_dependency_graph)
+
+    out = overlay.generate_with_anchor_bias("abc", max_new_tokens=1, max_length=8)
+
+    assert out["steps"]
+    step = out["steps"][0]
+    assert step["raw_contradiction_pressure"] == pytest.approx(0.9)
+    assert step["graph_contradiction_pressure"] == pytest.approx(0.2)
+    assert step["effective_contradiction_pressure"] == pytest.approx(0.2)
+    assert "top_biased_tokens" in step
 
 
 def test_qwen_overlay_can_compute_future_influence_from_texts():

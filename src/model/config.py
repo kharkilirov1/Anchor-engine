@@ -62,6 +62,16 @@ class ModelConfig:
     anchor_descendant_coherence_eta: float = 0.75
     anchor_detector_alignment_weight: float = 0.05
     anchor_context_stability_weight: float = 0.01
+    anchor_dependency_threshold: float = 0.55
+    anchor_dependency_confirm_slope: float = 0.10
+    anchor_dependency_temporal_window: float = 16.0
+    anchor_dependency_similarity_weight: float = 0.55
+    anchor_dependency_temporal_weight: float = 0.20
+    anchor_dependency_support_weight: float = 0.15
+    anchor_dependency_viability_weight: float = 0.10
+    anchor_dependency_max_predecessors: int = 4
+    anchor_dependency_counterfactual_top_edges: int = 0
+    anchor_dependency_future_window: int = 16
 
     # Training
     learning_rate: float = 3e-4

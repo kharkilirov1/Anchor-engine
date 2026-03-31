@@ -37,6 +37,7 @@ from src.model.anchor_tree_match import greedy_tree_match
 from src.model.anchor_tree_templates import get_expected_tree_template
 from src.model.anchor_tree_consistency import compute_graph_consistency, compute_tree_consistency
 from src.model.anchor_tree_proposals import rank_proposals_by_tree_repair
+from src.model.anchor_dependency_graph import build_anchor_dependency_graph
 
 
 class QwenAnchorOverlay(nn.Module):
@@ -109,6 +110,52 @@ class QwenAnchorOverlay(nn.Module):
             )
         return out
 
+    def _get_output_projection(self) -> nn.Module:
+        getter = getattr(self.base_model, "get_output_embeddings", None)
+        if callable(getter):
+            projection = getter()
+            if projection is not None:
+                return projection
+        for attr_name in ("lm_head", "proj", "output_projection"):
+            projection = getattr(self.base_model, attr_name, None)
+            if isinstance(projection, nn.Module):
+                return projection
+        raise ValueError("base model must expose output embeddings")
+
+    def _compute_dependency_graph(
+        self,
+        *,
+        active_anchors: list[AnchorRecord],
+        hidden: torch.Tensor | None = None,
+        input_ids: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        output_projection: nn.Module | None = None,
+        use_counterfactual_refinement: bool = False,
+    ) -> dict[str, Any]:
+        return build_anchor_dependency_graph(
+            anchors=active_anchors,
+            confirm_threshold=float(self.cfg.anchor_confirm_threshold),
+            dependency_threshold=float(self.cfg.anchor_dependency_threshold),
+            confirm_slope=float(self.cfg.anchor_dependency_confirm_slope),
+            similarity_weight=float(self.cfg.anchor_dependency_similarity_weight),
+            temporal_weight=float(self.cfg.anchor_dependency_temporal_weight),
+            support_weight=float(self.cfg.anchor_dependency_support_weight),
+            viability_weight=float(self.cfg.anchor_dependency_viability_weight),
+            temporal_window=float(self.cfg.anchor_dependency_temporal_window),
+            max_predecessors=int(self.cfg.anchor_dependency_max_predecessors),
+            counterfactual_top_edges=(
+                int(self.cfg.anchor_dependency_counterfactual_top_edges)
+                if use_counterfactual_refinement
+                else 0
+            ),
+            future_scorer=self.future_influence_scorer if use_counterfactual_refinement else None,
+            hidden=hidden,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_projection=output_projection,
+            future_window=int(self.cfg.anchor_dependency_future_window),
+        )
+
     @classmethod
     def from_pretrained(
         cls,
@@ -174,6 +221,32 @@ class QwenAnchorOverlay(nn.Module):
             arbiter={},
         )
         active_anchors = self.anchor_memory.get_active_anchors(revised_anchors)
+        output_projection = self._get_output_projection()
+        dependency_graph_batches = [
+            self._compute_dependency_graph(
+                active_anchors=batch_active,
+                hidden=hidden[batch_idx : batch_idx + 1] if hidden.ndim == 3 else None,
+                input_ids=input_ids[batch_idx : batch_idx + 1],
+                attention_mask=None if attention_mask is None else attention_mask[batch_idx : batch_idx + 1],
+                output_projection=output_projection,
+                use_counterfactual_refinement=False,
+            )
+            for batch_idx, batch_active in enumerate(active_anchors)
+        ]
+        diagnostics["dependency_graph_count"] = len(dependency_graph_batches)
+        diagnostics["dependency_graph_pressure"] = sum(
+            float(item["graph_pressure"]) for item in dependency_graph_batches
+        ) / max(len(dependency_graph_batches), 1)
+        diagnostics["dependency_current_pressure"] = sum(
+            float(item["current_graph_pressure"]) for item in dependency_graph_batches
+        ) / max(len(dependency_graph_batches), 1)
+        diagnostics["dependency_broken_anchor_count"] = sum(
+            int(item["broken_anchor_count"]) for item in dependency_graph_batches
+        )
+        diagnostics["dependency_edge_count"] = sum(int(item["edge_count"]) for item in dependency_graph_batches)
+        diagnostics["dependency_mean_validity"] = sum(
+            float(item["mean_validity"]) for item in dependency_graph_batches
+        ) / max(len(dependency_graph_batches), 1)
         diagnostics["revision_event_count"] = len(revision_events)
 
         return {
@@ -184,6 +257,7 @@ class QwenAnchorOverlay(nn.Module):
             "viability": viability_out["viability"],
             "revision_events": revision_events,
             "anchor_diagnostics": diagnostics,
+            "dependency_graph": dependency_graph_batches,
             "detector_scores": detector_out["scores"],
             "proposal_diagnostics": {
                 "proposal_count": 0,
@@ -620,9 +694,7 @@ class QwenAnchorOverlay(nn.Module):
         generated = input_ids
         generated_mask = attention_mask
         step_records: list[dict[str, Any]] = []
-        output_projection = self.base_model.get_output_embeddings()
-        if output_projection is None:
-            raise ValueError("base model must expose output embeddings")
+        output_projection = self._get_output_projection()
 
         for _ in range(max_new_tokens):
             outputs = self.base_model(
@@ -646,7 +718,17 @@ class QwenAnchorOverlay(nn.Module):
                 arbiter={},
             )
             active_anchors = self.anchor_memory.get_active_anchors(revised_anchors)[0]
+            dependency_graph = self._compute_dependency_graph(
+                active_anchors=active_anchors,
+                hidden=hidden,
+                input_ids=generated,
+                attention_mask=generated_mask,
+                output_projection=output_projection,
+                use_counterfactual_refinement=False,
+            )
             mean_pressure = float(diagnostics["mean_contradiction_pressure"])
+            graph_pressure = float(dependency_graph["current_graph_pressure"])
+            effective_pressure = graph_pressure if int(dependency_graph["edge_count"]) > 0 else mean_pressure
             effective_pressure_threshold = (
                 float(min_bias_pressure)
                 if min_bias_pressure is not None
@@ -657,7 +739,7 @@ class QwenAnchorOverlay(nn.Module):
             normalized_entropy = float(entropy_stats["normalized_entropy"].item())
             alpha_diag = compute_entropy_conflict_bias_scale(
                 normalized_entropy=normalized_entropy,
-                contradiction_pressure=mean_pressure,
+                contradiction_pressure=effective_pressure,
                 alpha_max=float(bias_scale),
                 entropy_threshold=float(entropy_threshold),
                 pressure_threshold=effective_pressure_threshold,
@@ -736,6 +818,11 @@ class QwenAnchorOverlay(nn.Module):
                     "raw_entropy": float(raw_entropy),
                     "normalized_entropy": float(normalized_entropy),
                     "raw_contradiction_pressure": float(mean_pressure),
+                    "graph_contradiction_pressure": float(graph_pressure),
+                    "effective_contradiction_pressure": float(effective_pressure),
+                    "dependency_edge_count": int(dependency_graph["edge_count"]),
+                    "dependency_broken_anchor_count": int(dependency_graph["broken_anchor_count"]),
+                    "dependency_mean_validity": float(dependency_graph["mean_validity"]),
                     "entropy_gate": float(alpha_diag["entropy_gate"]),
                     "pressure_gate": float(alpha_diag["pressure_gate"]),
                     "entropy_input_isfinite": bool(alpha_diag["entropy_input_isfinite"]),
