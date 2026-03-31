@@ -168,7 +168,7 @@ def test_build_bias_token_weights_returns_domain_profile() -> None:
 def test_get_bias_domain_profile_detects_math_prompt() -> None:
     profile = get_bias_domain_profile("Prove that sqrt(2)+sqrt(3) is irrational by contradiction.")
     assert profile.name == "math"
-    assert 0.3 <= profile.alpha_multiplier <= 0.4  # Conservative 0.35 (increased from 0.18)
+    assert 0.55 <= profile.alpha_multiplier <= 0.65  # Tuned 0.60 for valid math proofs
 
 
 def test_apply_forbidden_token_penalty_suppresses_blocked_ids() -> None:

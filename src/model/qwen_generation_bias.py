@@ -45,7 +45,7 @@ _DEFAULT_DOMAIN_PROFILE = BiasDomainProfile(
 )
 _MATH_DOMAIN_PROFILE = BiasDomainProfile(
     name="math",
-    alpha_multiplier=0.35,  # Conservative increase from 0.18 (was 0.65 - too aggressive)
+    alpha_multiplier=0.60,  # Tuned for valid math proof generation
     pressure_threshold_shift=0.22,
     rescue_floor_multiplier=0.20,
     forbidden_penalty=4.0,
