@@ -25,9 +25,13 @@ from src.model.future_span_hints import (
     build_auxiliary_future_proposals,
     build_future_hint_candidates,
     compute_span_anchor_overlap,
+    decode_span_text,
     extract_high_influence_spans,
     summarize_auxiliary_proposals,
 )
+from src.model.anchor_tree_builder import build_observed_tree
+from src.model.anchor_tree_match import greedy_tree_match
+from src.model.anchor_tree_templates import get_expected_tree_template
 
 
 class QwenAnchorOverlay(nn.Module):
@@ -392,6 +396,7 @@ class QwenAnchorOverlay(nn.Module):
         )
         hint_batches: list[dict[str, Any]] = []
         auxiliary_proposal_batches: list[list[dict[str, Any]]] = []
+        observed_tree_batches: list[dict[str, Any]] = []
         scores = out["future_influence"]["scores"]
         masks = batch.get("attention_mask")
         for batch_idx in range(batch["input_ids"].size(0)):
@@ -426,16 +431,59 @@ class QwenAnchorOverlay(nn.Module):
                 tokenizer=self.tokenizer,
             )
             auxiliary_proposal_batches.append(auxiliary_proposals)
+            active_anchor_payloads = [
+                {
+                    "anchor": anchor,
+                    "text": decode_span_text(
+                        self.tokenizer,
+                        [int(token.item()) for token in trimmed_ids[max(0, int(anchor.start_idx)) : min(valid_len, int(anchor.end_idx) + 1)]],
+                    ),
+                    "start": max(0, min(int(anchor.start_idx), valid_len - 1)),
+                    "end": max(0, min(int(anchor.end_idx), valid_len - 1)),
+                }
+                for anchor in out["active_anchors"][batch_idx]
+                if valid_len > 0
+            ]
+            observed_tree = build_observed_tree(
+                text=texts[batch_idx],
+                active_anchors=active_anchor_payloads,
+                future_hint_candidates=future_hint_candidates,
+                auxiliary_proposals=auxiliary_proposals,
+            )
+            tree_match = None
+            tree_diagnostics = None
+            if observed_tree.domain != "unknown":
+                expected_tree = get_expected_tree_template(observed_tree.domain)
+                tree_match = greedy_tree_match(observed_tree, expected_tree)
+                tree_diagnostics = {
+                    "domain": observed_tree.domain,
+                    "coverage": float(tree_match.coverage),
+                    "spurious_ratio": float(tree_match.spurious_ratio),
+                    "alignment_score": float(tree_match.alignment_score),
+                    "missing_required_count": int(len(tree_match.missing_required_ids)),
+                    "order_violations": int(tree_match.order_violations),
+                }
+            observed_tree_batches.append(
+                {
+                    "domain": observed_tree.domain,
+                    "observed_tree": observed_tree,
+                    "tree_match": tree_match,
+                    "tree_diagnostics": tree_diagnostics,
+                }
+            )
             hint_batches.append(
                 {
                     "active_anchor_spans": active_anchor_spans,
                     "future_spans": future_spans,
                     "future_hint_candidates": future_hint_candidates,
                     "auxiliary_proposals": auxiliary_proposals,
+                    "tree_domain": observed_tree.domain,
+                    "tree_diagnostics": tree_diagnostics,
                     **overlap,
                 }
             )
         out["future_hint_batches"] = hint_batches
+        out["observed_tree_batches"] = observed_tree_batches
         out["auxiliary_proposal_batches"] = auxiliary_proposal_batches
         out["auxiliary_proposal_diagnostics"] = summarize_auxiliary_proposals(auxiliary_proposal_batches)
         auxiliary_arbiter, auxiliary_batch_summaries = self._build_auxiliary_arbiter(
