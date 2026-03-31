@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from src.model.anchor_types import AnchorRecord, AnchorState
 from src.model.qwen_generation_bias import (
     apply_frequency_penalty,
+    apply_forbidden_token_penalty,
     apply_no_repeat_ngram,
     apply_repetition_penalty,
     build_bias_token_weights,
@@ -120,26 +122,46 @@ def test_compute_anchor_logits_bias_can_mask_blocked_tokens() -> None:
 
 def test_build_bias_token_weights_returns_domain_profile() -> None:
     class _ToyTokenizer:
+        def __init__(self) -> None:
+            self.surfaces = {
+                0: " the",
+                1: " theory",
+                2: " vegan",
+                3: " milk",
+                4: " tofu",
+                5: " django",
+            }
+
         def __call__(self, texts, padding=True, truncation=True, max_length=16, return_tensors="pt", add_special_tokens=False):
             del padding, truncation, return_tensors, add_special_tokens
             rows = []
             for text in texts if isinstance(texts, list) else [texts]:
-                ids = [min(ord(ch), 96) % 97 for ch in str(text)[:max_length]]
+                lowered = str(text).lower()
+                ids = [token_id for token_id, surface in self.surfaces.items() if surface.strip() in lowered]
+                if not ids:
+                    ids = [0]
                 rows.append(torch.tensor(ids, dtype=torch.long))
             padded = torch.nn.utils.rnn.pad_sequence(rows, batch_first=True, padding_value=0)
             mask = (padded != 0).long()
             return {"input_ids": padded, "attention_mask": mask}
 
+        def convert_ids_to_tokens(self, ids):
+            return [self.surfaces.get(int(token_id), f"tok{token_id}") for token_id in ids]
+
     tokenizer = _ToyTokenizer()
-    weights, diag = build_bias_token_weights(
+    weights, blocked_ids, diag = build_bias_token_weights(
         tokenizer=tokenizer,
-        vocab_size=97,
+        vocab_size=6,
         device=torch.device("cpu"),
         prompt="You are a vegan chef. Write a weekly meal plan.",
     )
     assert weights is not None
-    assert weights.shape == (97,)
+    assert weights.shape == (6,)
     assert diag["domain"] == "vegan"
+    assert weights[0] < 0.1
+    assert weights[3] == 0.0
+    assert weights[4] > 1.0
+    assert 3 in blocked_ids
     assert diag["masked_token_fraction"] >= 0.0
 
 
@@ -147,6 +169,18 @@ def test_get_bias_domain_profile_detects_math_prompt() -> None:
     profile = get_bias_domain_profile("Prove that sqrt(2)+sqrt(3) is irrational by contradiction.")
     assert profile.name == "math"
     assert profile.alpha_multiplier < 0.5
+
+
+def test_apply_forbidden_token_penalty_suppresses_blocked_ids() -> None:
+    logits = torch.tensor([[2.0, 1.0, 0.5, 0.0]], dtype=torch.float32)
+    adjusted = apply_forbidden_token_penalty(
+        logits=logits,
+        forbidden_token_ids={1, 3},
+        penalty=5.0,
+    )
+    assert torch.isclose(adjusted[0, 0], logits[0, 0])
+    assert adjusted[0, 1] == pytest.approx(-4.0)
+    assert adjusted[0, 3] == pytest.approx(-5.0)
 
 
 def test_compute_normalized_entropy_stays_between_zero_and_one() -> None:

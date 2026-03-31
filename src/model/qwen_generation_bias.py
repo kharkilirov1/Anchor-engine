@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 import math
-from typing import Iterable
+import re
+from typing import Any, Iterable
 
 import torch
 import torch.nn.functional as F
@@ -17,6 +18,8 @@ class BiasDomainProfile:
     alpha_multiplier: float
     pressure_threshold_shift: float
     rescue_floor_multiplier: float
+    forbidden_penalty: float
+    hard_block_forbidden: bool
     allow_terms: tuple[str, ...]
     block_terms: tuple[str, ...]
 
@@ -41,6 +44,8 @@ _DEFAULT_DOMAIN_PROFILE = BiasDomainProfile(
     alpha_multiplier=0.75,
     pressure_threshold_shift=0.10,
     rescue_floor_multiplier=0.50,
+    forbidden_penalty=0.0,
+    hard_block_forbidden=False,
     allow_terms=(),
     block_terms=(),
 )
@@ -49,6 +54,8 @@ _MATH_DOMAIN_PROFILE = BiasDomainProfile(
     alpha_multiplier=0.18,
     pressure_threshold_shift=0.22,
     rescue_floor_multiplier=0.20,
+    forbidden_penalty=4.0,
+    hard_block_forbidden=False,
     allow_terms=(
         "assume",
         "suppose",
@@ -80,6 +87,8 @@ _CODE_DOMAIN_PROFILE = BiasDomainProfile(
     alpha_multiplier=0.90,
     pressure_threshold_shift=0.04,
     rescue_floor_multiplier=0.85,
+    forbidden_penalty=6.0,
+    hard_block_forbidden=False,
     allow_terms=(
         "fastapi",
         "async",
@@ -110,6 +119,8 @@ _VEGAN_DOMAIN_PROFILE = BiasDomainProfile(
     alpha_multiplier=0.32,
     pressure_threshold_shift=0.12,
     rescue_floor_multiplier=0.35,
+    forbidden_penalty=8.0,
+    hard_block_forbidden=False,
     allow_terms=(
         "vegan",
         "plant",
@@ -218,27 +229,80 @@ def _extract_token_ids_from_term(
     return token_ids
 
 
+def _normalize_token_surface(text: str) -> str:
+    normalized = text.replace("Ġ", " ").replace("▁", " ").replace("</w>", " ")
+    normalized = normalized.replace("Ċ", " ").replace("ĉ", " ")
+    return normalized.strip().lower()
+
+
+def _surface_matches_term(surface: str, term: str) -> bool:
+    normalized_surface = _normalize_token_surface(surface)
+    normalized_term = _normalize_token_surface(term)
+    if not normalized_surface or not normalized_term:
+        return False
+    surface_words = re.findall(r"[a-zA-Z][a-zA-Z\-]*", normalized_surface)
+    term_words = re.findall(r"[a-zA-Z][a-zA-Z\-]*", normalized_term)
+    if not term_words:
+        return False
+    if len(normalized_term) <= 3:
+        return normalized_surface == normalized_term or normalized_term in surface_words
+    return (
+        normalized_surface == normalized_term
+        or normalized_term in normalized_surface
+        or any(word == normalized_term for word in surface_words)
+    )
+
+
+def _token_surface_map(
+    tokenizer: object,
+    vocab_size: int,
+) -> dict[int, str]:
+    convert = getattr(tokenizer, "convert_ids_to_tokens", None)
+    if callable(convert):
+        try:
+            token_list = convert(list(range(vocab_size)))
+            if isinstance(token_list, list) and len(token_list) == vocab_size:
+                return {idx: str(token) for idx, token in enumerate(token_list)}
+        except Exception:
+            pass
+
+    surface_map: dict[int, str] = {}
+    for token_id in range(vocab_size):
+        try:
+            surface_map[token_id] = str(tokenizer.decode([token_id], skip_special_tokens=False))
+        except Exception:
+            surface_map[token_id] = ""
+    return surface_map
+
+
 def build_bias_token_weights(
     tokenizer: object | None,
     vocab_size: int,
     device: torch.device,
     prompt: str,
-) -> tuple[torch.Tensor | None, dict[str, float | str]]:
+) -> tuple[torch.Tensor | None, set[int], dict[str, Any]]:
     profile = get_bias_domain_profile(prompt)
     if tokenizer is None:
-        return None, {
+        return None, set(), {
             "domain": profile.name,
             "alpha_multiplier": float(profile.alpha_multiplier),
             "pressure_threshold_shift": float(profile.pressure_threshold_shift),
             "rescue_floor_multiplier": float(profile.rescue_floor_multiplier),
+            "forbidden_penalty": float(profile.forbidden_penalty),
+            "hard_block_forbidden": bool(profile.hard_block_forbidden),
             "masked_token_fraction": 0.0,
             "boosted_token_fraction": 0.0,
         }
 
     weights = torch.ones(vocab_size, device=device, dtype=torch.float32)
+    surface_map = _token_surface_map(tokenizer, vocab_size)
     generic_ids: set[int] = set()
     for term in _GENERIC_BIAS_TERMS:
         generic_ids.update(_extract_token_ids_from_term(tokenizer, term))
+        generic_ids.update(
+            token_id for token_id, surface in surface_map.items()
+            if _surface_matches_term(surface, term)
+        )
     for token_id in generic_ids:
         if 0 <= token_id < vocab_size:
             weights[token_id] = min(float(weights[token_id].item()), 0.05)
@@ -246,6 +310,10 @@ def build_bias_token_weights(
     blocked_ids: set[int] = set()
     for term in profile.block_terms:
         blocked_ids.update(_extract_token_ids_from_term(tokenizer, term))
+        blocked_ids.update(
+            token_id for token_id, surface in surface_map.items()
+            if _surface_matches_term(surface, term)
+        )
     for token_id in blocked_ids:
         if 0 <= token_id < vocab_size:
             weights[token_id] = 0.0
@@ -253,18 +321,47 @@ def build_bias_token_weights(
     allow_ids: set[int] = set()
     for term in profile.allow_terms:
         allow_ids.update(_extract_token_ids_from_term(tokenizer, term))
+        allow_ids.update(
+            token_id for token_id, surface in surface_map.items()
+            if _surface_matches_term(surface, term)
+        )
     for token_id in allow_ids:
         if 0 <= token_id < vocab_size and weights[token_id] > 0.0:
             weights[token_id] = max(float(weights[token_id].item()), 1.35)
 
-    return weights, {
+    return weights, blocked_ids, {
         "domain": profile.name,
         "alpha_multiplier": float(profile.alpha_multiplier),
         "pressure_threshold_shift": float(profile.pressure_threshold_shift),
         "rescue_floor_multiplier": float(profile.rescue_floor_multiplier),
+        "forbidden_penalty": float(profile.forbidden_penalty),
+        "hard_block_forbidden": bool(profile.hard_block_forbidden),
         "masked_token_fraction": float((weights == 0).float().mean().item()),
         "boosted_token_fraction": float((weights > 1.0).float().mean().item()),
+        "forbidden_token_count": int(len(blocked_ids)),
     }
+
+
+def apply_forbidden_token_penalty(
+    logits: torch.Tensor,
+    forbidden_token_ids: Iterable[int],
+    penalty: float,
+    *,
+    hard_block: bool = False,
+) -> torch.Tensor:
+    if logits.ndim != 2 or logits.size(0) != 1:
+        raise ValueError("logits must be shaped [1, vocab_size]")
+    if penalty <= 0.0:
+        return logits
+    token_ids = sorted({int(token_id) for token_id in forbidden_token_ids if int(token_id) >= 0})
+    if not token_ids:
+        return logits
+    adjusted = logits.clone()
+    if hard_block:
+        adjusted[0, token_ids] = torch.finfo(adjusted.dtype).min
+        return adjusted
+    adjusted[0, token_ids] = adjusted[0, token_ids] - float(penalty)
+    return adjusted
 
 
 def compute_anchor_generation_gate(

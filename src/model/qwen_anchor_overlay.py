@@ -18,6 +18,7 @@ from src.model.config import ModelConfig, TOY_CONFIG
 from src.model.future_influence import FutureInfluenceScorer
 from src.model.qwen_generation_bias import (
     apply_frequency_penalty,
+    apply_forbidden_token_penalty,
     apply_no_repeat_ngram,
     apply_repetition_penalty,
     build_bias_token_weights,
@@ -696,7 +697,7 @@ class QwenAnchorOverlay(nn.Module):
         generated_mask = attention_mask
         step_records: list[dict[str, Any]] = []
         output_projection = self._get_output_projection()
-        bias_token_weights, bias_profile = build_bias_token_weights(
+        bias_token_weights, forbidden_token_ids, bias_profile = build_bias_token_weights(
             tokenizer=self.tokenizer,
             vocab_size=int(self.base_model.config.vocab_size),
             device=device,
@@ -782,6 +783,12 @@ class QwenAnchorOverlay(nn.Module):
             top_biased_tokens = self._summarize_top_biased_tokens(anchor_bias)
             adjusted_logits = next_logits + anchor_bias.to(next_logits.dtype)
             adjusted_logits = torch.nan_to_num(adjusted_logits, nan=0.0, posinf=1e4, neginf=-1e4)
+            adjusted_logits = apply_forbidden_token_penalty(
+                logits=adjusted_logits,
+                forbidden_token_ids=forbidden_token_ids,
+                penalty=float(bias_profile["forbidden_penalty"]),
+                hard_block=bool(bias_profile["hard_block_forbidden"]),
+            )
             adjusted_logits = apply_repetition_penalty(
                 logits=adjusted_logits,
                 generated_ids=generated,
@@ -848,6 +855,9 @@ class QwenAnchorOverlay(nn.Module):
                     "bias_pressure_threshold": float(effective_pressure_threshold),
                     "bias_masked_token_fraction": float(bias_profile["masked_token_fraction"]),
                     "bias_boosted_token_fraction": float(bias_profile["boosted_token_fraction"]),
+                    "forbidden_token_count": int(bias_profile["forbidden_token_count"]),
+                    "forbidden_penalty": float(bias_profile["forbidden_penalty"]),
+                    "hard_block_forbidden": bool(bias_profile["hard_block_forbidden"]),
                     "blocked_ngram_token_count": int(len(blocked_tokens)),
                     "bias_applied": bool(bias_diag) and effective_scale > 0.0,
                 }
