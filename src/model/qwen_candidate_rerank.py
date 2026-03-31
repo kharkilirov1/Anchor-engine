@@ -58,12 +58,44 @@ def compute_anchor_bonus(
     )
 
 
+def compute_tree_bonus(
+    coverage: float,
+    alignment_score: float,
+    drift_score: float,
+    best_repair_gain: float,
+    graph_consistency_score: float,
+    mean_repair_gain: float,
+) -> float:
+    return (
+        0.60 * float(coverage)
+        + 0.55 * float(alignment_score)
+        - 0.45 * float(drift_score)
+        + 0.35 * float(best_repair_gain)
+        + 0.20 * float(graph_consistency_score)
+        + 0.20 * float(mean_repair_gain)
+    )
+
+
 def reranked_candidate_score(
     base_average_logprob: float,
     anchor_bonus: float,
     rerank_strength: float,
 ) -> float:
     return float(base_average_logprob) + float(rerank_strength) * float(anchor_bonus)
+
+
+def branch_aware_candidate_score(
+    base_average_logprob: float,
+    anchor_bonus: float,
+    tree_bonus: float,
+    rerank_strength: float,
+    tree_strength: float,
+) -> float:
+    return (
+        float(base_average_logprob)
+        + float(rerank_strength) * float(anchor_bonus)
+        + float(tree_strength) * float(tree_bonus)
+    )
 
 
 def extract_candidate_metrics(
@@ -87,5 +119,43 @@ def extract_candidate_metrics(
         "auxiliary_revision_retire_delta": int(aux["auxiliary_retire_delta"]),
         "auxiliary_revision_matched_anchor_count": int(aux["matched_anchor_count"]),
         "auxiliary_revision_mean_alt_prob": float(aux["mean_alt_prob"]),
+        "auxiliary_revision_mean_repair_gain": float(aux.get("mean_repair_gain", 0.0)),
         "anchor_bonus": float(anchor_bonus),
     }
+
+
+def extract_tree_candidate_metrics(
+    out: dict[str, Any],
+) -> dict[str, float]:
+    observed_batches = out.get("observed_tree_batches") or []
+    graph_diag = out.get("observed_tree_graph_diagnostics") or {}
+    batch_diag = observed_batches[0] if observed_batches else {}
+    tree_diag = batch_diag.get("tree_diagnostics") or {}
+    proposal_repair = batch_diag.get("proposal_repair") or []
+    best_repair_gain = float(proposal_repair[0].repair_gain) if proposal_repair else 0.0
+    tree_bonus = compute_tree_bonus(
+        coverage=float(tree_diag.get("coverage", 0.0)),
+        alignment_score=float(tree_diag.get("alignment_score", 0.0)),
+        drift_score=float(tree_diag.get("drift_score", 0.0)),
+        best_repair_gain=best_repair_gain,
+        graph_consistency_score=float(graph_diag.get("graph_consistency_score", 1.0)),
+        mean_repair_gain=float(out.get("auxiliary_revision_diagnostics", {}).get("mean_repair_gain", 0.0)),
+    )
+    return {
+        "tree_domain": str(batch_diag.get("domain", "unknown")),
+        "tree_coverage": float(tree_diag.get("coverage", 0.0)),
+        "tree_alignment_score": float(tree_diag.get("alignment_score", 0.0)),
+        "tree_spurious_ratio": float(tree_diag.get("spurious_ratio", 0.0)),
+        "tree_drift_score": float(tree_diag.get("drift_score", 0.0)),
+        "tree_best_repair_gain": float(best_repair_gain),
+        "tree_graph_consistency_score": float(graph_diag.get("graph_consistency_score", 1.0)),
+        "tree_mean_pair_conflict": float(graph_diag.get("mean_pair_conflict", 0.0)),
+        "tree_bonus": float(tree_bonus),
+    }
+
+
+def select_best_branch(candidates: list[dict[str, Any]], score_key: str) -> dict[str, Any]:
+    if not candidates:
+        raise ValueError("candidates must not be empty")
+    return max(candidates, key=lambda item: float(item[score_key]))
+
