@@ -1168,7 +1168,7 @@ class QwenAnchorOverlay(nn.Module):
         frequency_penalty: float = 0.05,
         no_repeat_ngram_size: int = 3,
         hard_block_forbidden: bool = True,
-        use_geometry_routing: bool = False,
+        use_geometry_routing: bool = True,
         geometry_probe_max_length: int = 128,
         mature_r1_threshold: float = 0.65,
         template_delta_threshold: float = 0.08,

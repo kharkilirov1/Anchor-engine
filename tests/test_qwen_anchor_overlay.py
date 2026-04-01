@@ -348,6 +348,38 @@ def test_tree_guided_generate_dispatches_anchor_forced_route(monkeypatch: pytest
     assert out["geometry_route"]["cluster"] == "flat"
 
 
+def test_tree_guided_generate_uses_geometry_routing_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    model = _DummyCausalLM()
+    tokenizer = _DummyTokenizer()
+    overlay = QwenAnchorOverlay(base_model=model, cfg=TOY_CONFIG, tokenizer=tokenizer)
+
+    def _fake_route(prompt: str, **kwargs: object) -> dict[str, object]:
+        del prompt, kwargs
+        return {"matched": True, "cluster": "flat", "route": "anchor_forced"}
+
+    def _fake_anchor_generate(**kwargs: object) -> dict[str, object]:
+        return {
+            "prompt": kwargs["prompt"],
+            "generated_text": "anchor-result",
+            "continuation_text": "anchor-result",
+            "steps": [],
+        }
+
+    monkeypatch.setattr(overlay, "_compute_geometry_routing_decision", _fake_route)
+    monkeypatch.setattr(overlay, "generate_with_anchor_bias", _fake_anchor_generate)
+
+    out = overlay.tree_guided_generate(
+        "prompt text",
+        max_new_tokens=4,
+        max_length=32,
+    )
+
+    assert out["generation_mode"] == "anchor_forced"
+    assert out["tree_guided"] is False
+    assert out["geometry_route"]["enabled"] is True
+    assert out["geometry_route"]["cluster"] == "flat"
+
+
 def test_tree_guided_generate_dispatches_trust_route(monkeypatch: pytest.MonkeyPatch) -> None:
     model = _DummyCausalLM()
     tokenizer = _DummyTokenizer()
