@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import json
 import math
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -46,32 +47,41 @@ DEFAULT_PRESSURE_THRESHOLD = 0.60
 DEFAULT_PRESSURE_SLOPE = 0.08
 DEFAULT_PRESSURE_RESCUE_FLOOR = 0.20
 
-KEYWORD_MAP: dict[str, dict[str, list[str]]] = {
+KEYWORD_MAP: dict[str, dict[str, Any]] = {
     "strictly_vegan_meal_plan_policy": {
         "positive": ["vegan", "plant-based", "tofu", "lentil", "chickpea", "beans", "vegetable", "mushroom"],
         "negative": ["egg", "eggs", "cheese", "butter", "milk", "cream", "meat", "chicken", "beef"],
+        "min_unique_positive_hits": 2,
     },
     "async_fastapi_service_architecture_policy": {
         "positive": ["async", "await", "FastAPI", "router", "endpoint", "dependency", "asyncio"],
-        "negative": ["Flask", "Django", "sync", "blocking", "thread", "subprocess"],
+        "negative": ["Flask", "Django", "jinja", "template rendering", "class-based view", "wsgi", "sync view", "sync handler"],
+        "min_unique_positive_hits": 2,
     },
     "json_only_response_format_policy": {
         "positive": ["json", "JSON", "{", "}", "key", "value", "format"],
         "negative": ["markdown", "plain text", "prose", "sorry", "I cannot", "Here is"],
+        "min_unique_positive_hits": 2,
     },
     "proof_by_contradiction_reasoning_steps": {
         "positive": ["assume", "contradiction", "suppose", "therefore", "absurd", "QED", "proof"],
         "negative": ["example", "for instance", "because", "simply", "just", "obviously"],
+        "min_unique_positive_hits": 2,
     },
     "binary_search_update_loop_procedure": {
         "positive": ["mid", "low", "high", "left", "right", "while", "binary", "O(log"],
         "negative": ["for i", "linear", "scan", "iterate", "brute"],
+        "min_unique_positive_hits": 2,
     },
     "dependency_injection_request_flow_sequence": {
         "positive": ["inject", "dependency", "container", "resolve", "provider", "interface"],
         "negative": ["global", "singleton", "import", "hardcode", "direct instantiation"],
+        "min_unique_positive_hits": 2,
     },
 }
+
+DEGENERATE_BIGRAM_RATIO = 0.30
+DEGENERATE_MAX_SENTENCE_REPEAT = 3
 
 
 def _tensor_offsets_to_list(offset_mapping: Any) -> list[tuple[int, int]] | None:
@@ -98,6 +108,100 @@ def _to_scalar(value: float | int | None) -> float | int | None:
     if not math.isfinite(float(value)):
         return None
     return float(value)
+
+
+def _find_occurrences(text: str, term: str) -> list[int]:
+    positions: list[int] = []
+    start = 0
+    while True:
+        idx = text.find(term, start)
+        if idx < 0:
+            break
+        positions.append(idx)
+        start = idx + len(term)
+    return positions
+
+
+def _count_negative_hits(
+    text: str,
+    term: str,
+    protected_phrases: list[str],
+) -> tuple[int, int]:
+    occurrences = _find_occurrences(text, term)
+    if not occurrences:
+        return 0, 0
+    protected_spans: list[tuple[int, int]] = []
+    for phrase in protected_phrases:
+        for start in _find_occurrences(text, phrase):
+            protected_spans.append((start, start + len(phrase)))
+    effective = 0
+    protected = 0
+    for start in occurrences:
+        end = start + len(term)
+        if any(span_start <= start and end <= span_end for span_start, span_end in protected_spans):
+            protected += 1
+        else:
+            effective += 1
+    return effective, protected
+
+
+def compute_constraint_analysis(
+    text: str,
+    keyword_spec: dict[str, Any],
+) -> dict[str, Any]:
+    positive_keywords = [str(token).lower() for token in keyword_spec.get("positive", [])]
+    negative_keywords = [str(token).lower() for token in keyword_spec.get("negative", [])]
+    negative_exceptions = {
+        str(token).lower(): [str(phrase).lower() for phrase in phrases]
+        for token, phrases in dict(keyword_spec.get("negative_exceptions", {})).items()
+    }
+    raw_metrics = analyze_keywords(text, positive_keywords=[], negative_keywords=[])
+    lowered = text.lower()
+
+    positive_hits = {token: lowered.count(token) for token in positive_keywords if lowered.count(token) > 0}
+    negative_hits: dict[str, int] = {}
+    protected_negative_hits: dict[str, int] = {}
+    for token in negative_keywords:
+        effective, protected = _count_negative_hits(
+            lowered,
+            token,
+            protected_phrases=negative_exceptions.get(token, []),
+        )
+        if effective > 0:
+            negative_hits[token] = effective
+        if protected > 0:
+            protected_negative_hits[token] = protected
+
+    unique_positive_hits = len(positive_hits)
+    negative_total = int(sum(negative_hits.values()))
+    degenerate_output = bool(
+        float(raw_metrics["repeated_bigram_ratio"]) >= DEGENERATE_BIGRAM_RATIO
+        or int(raw_metrics["max_sentence_repeat"]) >= DEGENERATE_MAX_SENTENCE_REPEAT
+    )
+    min_unique_positive_hits = int(keyword_spec.get("min_unique_positive_hits", 2))
+    constraint_satisfied = bool(
+        unique_positive_hits >= min_unique_positive_hits
+        and negative_total == 0
+        and not degenerate_output
+    )
+    return {
+        "positive_hits": positive_hits,
+        "negative_hits": negative_hits,
+        "protected_negative_hits": protected_negative_hits,
+        "positive_total": int(sum(positive_hits.values())),
+        "negative_total": negative_total,
+        "unique_positive_hits": unique_positive_hits,
+        "min_unique_positive_hits": min_unique_positive_hits,
+        "lexical_score": float(raw_metrics["lexical_score"]),
+        "repeated_bigram_ratio": float(raw_metrics["repeated_bigram_ratio"]),
+        "max_sentence_repeat": int(raw_metrics["max_sentence_repeat"]),
+        "degeneracy_penalty": float(raw_metrics["degeneracy_penalty"]),
+        "quality_score": float(raw_metrics["quality_score"]),
+        "degenerate_output": degenerate_output,
+        "constraint_satisfied": constraint_satisfied,
+        "constraint_score": float(1.0 if constraint_satisfied else 0.0),
+        "drift_detected": bool(negative_total > 0),
+    }
 
 
 def encode_case(
@@ -221,13 +325,33 @@ def analyze_keywords(
             protected_negative_hits[token] = protected
 
     lexical_score = float(sum(positive_hits.values()) - sum(negative_hits.values()))
-    quality_score = lexical_score - 1.5 * float(sum(negative_hits.values()))
+    word_tokens = re.findall(r"[a-zA-Z_]+", lowered)
+    bigrams = list(zip(word_tokens, word_tokens[1:]))
+    repeated_bigram_ratio = 0.0
+    if bigrams:
+        repeated_bigram_ratio = 1.0 - (len(set(bigrams)) / max(len(bigrams), 1))
+    sentence_candidates = [
+        sentence.strip()
+        for sentence in re.split(r"[.!?\n]+", lowered)
+        if sentence.strip()
+    ]
+    sentence_counts: dict[str, int] = {}
+    max_sentence_repeat = 0
+    for sentence in sentence_candidates:
+        sentence_counts[sentence] = sentence_counts.get(sentence, 0) + 1
+        max_sentence_repeat = max(max_sentence_repeat, sentence_counts[sentence])
+    degeneracy_penalty = float(8.0 * repeated_bigram_ratio + 1.5 * max(0, max_sentence_repeat - 1))
+    quality_score = float(lexical_score - degeneracy_penalty - 1.5 * sum(negative_hits.values()))
     return {
         "positive_hits": positive_hits,
         "negative_hits": negative_hits,
         "protected_negative_hits": protected_negative_hits,
         "positive_total": int(sum(positive_hits.values())),
         "negative_total": int(sum(negative_hits.values())),
+        "lexical_score": lexical_score,
+        "repeated_bigram_ratio": float(repeated_bigram_ratio),
+        "max_sentence_repeat": int(max_sentence_repeat),
+        "degeneracy_penalty": float(degeneracy_penalty),
         "quality_score": float(quality_score),
     }
 
@@ -358,9 +482,6 @@ def analyze_case(
         return None
 
     keyword_spec = KEYWORD_MAP.get(case.anchor_group)
-    positive_keywords = keyword_spec["positive"] if keyword_spec is not None else []
-    negative_keywords = keyword_spec["negative"] if keyword_spec is not None else []
-
     base = generate_base(
         overlay=overlay,
         prompt=case.prompt,
@@ -394,32 +515,28 @@ def analyze_case(
         base_analysis = {
             "positive_total": 0,
             "negative_total": 0,
+            "unique_positive_hits": 0,
             "quality_score": None,
+            "constraint_score": None,
+            "constraint_satisfied": False,
+            "degenerate_output": False,
             "drift_detected": False,
         }
         anchor_analysis = {
             "positive_total": 0,
             "negative_total": 0,
+            "unique_positive_hits": 0,
             "quality_score": None,
+            "constraint_score": None,
+            "constraint_satisfied": False,
+            "degenerate_output": False,
             "drift_detected": False,
         }
         constraint_delta = None
     else:
-        base_raw = analyze_keywords(base_continuation, positive_keywords=positive_keywords, negative_keywords=negative_keywords)
-        anchor_raw = analyze_keywords(anchor_continuation, positive_keywords=positive_keywords, negative_keywords=negative_keywords)
-        base_analysis = {
-            "positive_total": int(base_raw["positive_total"]),
-            "negative_total": int(base_raw["negative_total"]),
-            "quality_score": float(base_raw["quality_score"]),
-            "drift_detected": bool(base_raw["negative_total"] > 0),
-        }
-        anchor_analysis = {
-            "positive_total": int(anchor_raw["positive_total"]),
-            "negative_total": int(anchor_raw["negative_total"]),
-            "quality_score": float(anchor_raw["quality_score"]),
-            "drift_detected": bool(anchor_raw["negative_total"] > 0),
-        }
-        constraint_delta = float(anchor_analysis["quality_score"] - base_analysis["quality_score"])
+        base_analysis = compute_constraint_analysis(base_continuation, keyword_spec=keyword_spec)
+        anchor_analysis = compute_constraint_analysis(anchor_continuation, keyword_spec=keyword_spec)
+        constraint_delta = float(anchor_analysis["constraint_score"] - base_analysis["constraint_score"])
 
     print(f"DONE {case.name}: cluster={geometry['anchor_cluster']}")
     return {
@@ -442,20 +559,36 @@ def analyze_case(
         "anchor_continuation": anchor_continuation,
         "base_analysis": base_analysis,
         "anchor_analysis": anchor_analysis,
+        "base_degenerate": bool(base_analysis["degenerate_output"]),
+        "included_in_calibration": bool(not base_analysis["degenerate_output"] and constraint_delta is not None),
         "constraint_delta": _to_scalar(constraint_delta),
     }
 
 
 def _cluster_summary(cases: list[dict[str, Any]], cluster: str) -> dict[str, Any]:
     cluster_cases = [case for case in cases if case["anchor_cluster"] == cluster]
-    deltas = [float(case["constraint_delta"]) for case in cluster_cases if case["constraint_delta"] is not None]
-    drifts = [1.0 if case["anchor_analysis"]["drift_detected"] else 0.0 for case in cluster_cases]
+    included_cases = [case for case in cluster_cases if case.get("included_in_calibration", False)]
+    deltas = [float(case["constraint_delta"]) for case in included_cases if case["constraint_delta"] is not None]
+    drifts = [1.0 if case["anchor_analysis"]["drift_detected"] else 0.0 for case in included_cases]
     r1_values = [float(case["r1_at_24"]) for case in cluster_cases if case["r1_at_24"] is not None]
+    excluded_case_names = [case["name"] for case in cluster_cases if not case.get("included_in_calibration", False)]
+    wins = sum(1 for delta in deltas if delta > 0)
+    losses = sum(1 for delta in deltas if delta < 0)
+    ties = sum(1 for delta in deltas if delta == 0)
+    median_constraint_delta = None
+    if deltas:
+        median_constraint_delta = float(np.median(np.array(deltas, dtype=np.float64)))
     return {
-        "n": len(cluster_cases),
+        "n_total": len(cluster_cases),
+        "n_included": len(included_cases),
         "mean_constraint_delta": float(sum(deltas) / len(deltas)) if deltas else None,
+        "median_constraint_delta": median_constraint_delta,
         "mean_drift_rate": float(sum(drifts) / len(drifts)) if drifts else None,
         "r1_at_24_range": [float(min(r1_values)), float(max(r1_values))] if r1_values else [None, None],
+        "wins": wins,
+        "losses": losses,
+        "ties": ties,
+        "excluded_case_names": excluded_case_names,
     }
 
 
@@ -468,6 +601,11 @@ def build_calibration_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
     if flat_mean is not None and template_mean is not None and mature_mean is not None:
         observed_separation = bool(flat_mean < min(template_mean, mature_mean))
     return {
+        "n_total_cases": len(cases),
+        "n_included_cases": sum(1 for case in cases if case.get("included_in_calibration", False)),
+        "excluded_base_degenerate_case_names": [
+            case["name"] for case in cases if case.get("base_degenerate", False)
+        ],
         "by_cluster": by_cluster,
         "threshold_candidates": {
             "r1_at_24_mature_threshold": 0.65,
@@ -505,14 +643,16 @@ def build_markdown_report(
         f"- Model: `{model_name}`",
         f"- Device: `{device}`",
         f"- n_cases: `{len(cases)}`",
-        f"- mature: `{cluster_counts['mature']}`",
-        f"- template: `{cluster_counts['template']}`",
-        f"- flat: `{cluster_counts['flat']}`",
+        f"- n_included_in_calibration: `{calibration['n_included_cases']}`",
+            f"- mature: `{cluster_counts['mature']}`",
+            f"- template: `{cluster_counts['template']}`",
+            f"- flat: `{cluster_counts['flat']}`",
+            f"- excluded_base_degenerate_cases: `{len(calibration['excluded_base_degenerate_case_names'])}`",
         "",
         "## Per-case table",
         "",
-        "| name | cluster | r1@L24 | delta_L26→L27 | slope_L18-L24 | base_quality | anchor_quality | constraint_delta | drift_detected |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| name | cluster | r1@L24 | delta_L26→L27 | slope_L18-L24 | base_constraint | anchor_constraint | constraint_delta | base_degenerate | drift_detected |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for case in cases:
         lines.append(
@@ -524,9 +664,10 @@ def build_markdown_report(
                     _fmt(case["r1_at_24"]),
                     _fmt(case["delta_l26_l27"]),
                     _fmt(case["slope_l18_l24"]),
-                    _fmt(case["base_analysis"]["quality_score"]),
-                    _fmt(case["anchor_analysis"]["quality_score"]),
+                    _fmt(case["base_analysis"]["constraint_score"]),
+                    _fmt(case["anchor_analysis"]["constraint_score"]),
                     _fmt(case["constraint_delta"]),
+                    str(case["base_degenerate"]),
                     str(case["anchor_analysis"]["drift_detected"]),
                 ]
             )
@@ -537,8 +678,8 @@ def build_markdown_report(
             "",
             "## Calibration summary",
             "",
-            "| cluster | n | mean_constraint_delta | mean_drift_rate | r1_at_24_range |",
-            "| --- | ---: | ---: | ---: | --- |",
+            "| cluster | n_total | n_included | mean_constraint_delta | median_constraint_delta | mean_drift_rate | wins | losses | ties | r1_at_24_range |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
     for cluster, summary in calibration["by_cluster"].items():
@@ -547,9 +688,14 @@ def build_markdown_report(
             + " | ".join(
                 [
                     cluster,
-                    str(summary["n"]),
+                    str(summary["n_total"]),
+                    str(summary["n_included"]),
                     _fmt(summary["mean_constraint_delta"]),
+                    _fmt(summary["median_constraint_delta"]),
                     _fmt(summary["mean_drift_rate"]),
+                    str(summary["wins"]),
+                    str(summary["losses"]),
+                    str(summary["ties"]),
                     f"[{_fmt(summary['r1_at_24_range'][0])}, {_fmt(summary['r1_at_24_range'][1])}]",
                 ]
             )
@@ -558,11 +704,13 @@ def build_markdown_report(
     lines.extend(
         [
             "",
+            f"- excluded_base_degenerate_case_names: `{calibration['excluded_base_degenerate_case_names']}`",
+            "",
             f"- observed_separation: `{calibration['threshold_candidates']['observed_separation']}`",
             "",
             "## Conclusion",
             "",
-            f"Current data {'support' if calibration['threshold_candidates']['observed_separation'] else 'do not support'} the thresholds `0.65 / 0.08` as a clean routing split.",
+            f"Current data {'support' if calibration['threshold_candidates']['observed_separation'] else 'do not support'} the thresholds `0.65 / 0.08` as a clean routing split after excluding degenerate-base calibration failures.",
             "",
         ]
     )
