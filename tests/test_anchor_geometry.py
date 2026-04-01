@@ -3,10 +3,15 @@ from __future__ import annotations
 import torch
 
 from src.utils.anchor_geometry import (
+    build_computability_flags,
     compute_cross_prompt_stability,
     compute_geometry_metrics,
+    decode_token_pieces,
+    decode_token_surfaces,
+    list_model_layers,
     match_anchor_span,
     select_representative_layers,
+    token_has_leading_whitespace,
 )
 
 
@@ -25,6 +30,13 @@ class DummyTokenizer:
             13: " meal",
             14: " plan",
         }
+        self.converted = {
+            101: "<bos>",
+            11: "strictly",
+            12: "Ġvegan",
+            13: "Ġmeal",
+            14: "Ġplan",
+        }
 
     def __call__(self, text: str, add_special_tokens: bool = False) -> dict[str, list[int]]:
         _ = add_special_tokens
@@ -36,9 +48,16 @@ class DummyTokenizer:
         _ = skip_special_tokens
         return "".join(self.ids_to_surface.get(int(token_id), "") for token_id in token_ids)
 
+    def convert_ids_to_tokens(self, token_ids: list[int]) -> list[str]:
+        return [self.converted[int(token_id)] for token_id in token_ids]
+
 
 def test_select_representative_layers_matches_qwen_style_targets() -> None:
     assert select_representative_layers(28) == [7, 14, 21, 27]
+
+
+def test_list_model_layers_returns_zero_based_stack() -> None:
+    assert list_model_layers(4) == [0, 1, 2, 3]
 
 
 def test_match_anchor_span_prefers_offsets_when_available() -> None:
@@ -57,6 +76,15 @@ def test_match_anchor_span_prefers_offsets_when_available() -> None:
     assert match.token_start == 1
     assert match.token_end == 4
     assert match.match_method == "offset_mapping"
+
+
+def test_decode_token_helpers_and_leading_whitespace_marker() -> None:
+    tokenizer = DummyTokenizer()
+    token_ids = [11, 12, 13]
+    assert decode_token_surfaces(tokenizer, token_ids) == ["strictly", "Ġvegan", "Ġmeal"]
+    assert decode_token_pieces(tokenizer, token_ids) == ["strictly", " vegan", " meal"]
+    assert token_has_leading_whitespace("Ġvegan", " vegan") is True
+    assert token_has_leading_whitespace("strictly", "strictly") is False
 
 
 def test_compute_geometry_metrics_separates_straight_and_curved_paths() -> None:
@@ -87,6 +115,16 @@ def test_compute_geometry_metrics_separates_straight_and_curved_paths() -> None:
     assert straight_metrics["rank1_explained_variance"] is not None
     assert curved_metrics["rank1_explained_variance"] is not None
     assert straight_metrics["rank1_explained_variance"] > curved_metrics["rank1_explained_variance"]
+
+
+def test_build_computability_flags_marks_short_spans() -> None:
+    metrics = compute_geometry_metrics(torch.tensor([[1.0, 0.0]], dtype=torch.float32))
+    flags = build_computability_flags(metrics)
+    assert flags["span_mean_direction"] is True
+    assert flags["mean_direction_norm"] is True
+    assert flags["adjacent_cosine_coherence"] is False
+    assert flags["path_tortuosity"] is False
+    assert flags["rank1_explained_variance"] is False
 
 
 def test_compute_cross_prompt_stability_reports_pairwise_cosines() -> None:

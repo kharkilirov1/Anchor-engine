@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 
 _EPS = 1e-8
+_LEADING_WHITESPACE_MARKERS = ("Ġ", "▁", "Ċ", "ĉ")
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,12 @@ def select_representative_layers(
     return sorted(set(layers))
 
 
+def list_model_layers(num_hidden_layers: int) -> list[int]:
+    if num_hidden_layers <= 0:
+        raise ValueError("num_hidden_layers must be positive")
+    return list(range(int(num_hidden_layers)))
+
+
 def _normalize_text(text: str) -> str:
     return " ".join(text.lower().split())
 
@@ -68,6 +75,37 @@ def _decode_anchor_tokens(
         return str(tokenizer.decode(token_ids, skip_special_tokens=False))
     except Exception:
         return ""
+
+
+def decode_token_surfaces(
+    tokenizer: Any,
+    token_ids: list[int],
+) -> list[str]:
+    convert = getattr(tokenizer, "convert_ids_to_tokens", None)
+    if callable(convert):
+        try:
+            tokens = convert(token_ids)
+            if isinstance(tokens, list) and len(tokens) == len(token_ids):
+                return [str(token) for token in tokens]
+        except Exception:
+            pass
+    return [_decode_anchor_tokens(tokenizer, [int(token_id)]) for token_id in token_ids]
+
+
+def decode_token_pieces(
+    tokenizer: Any,
+    token_ids: list[int],
+) -> list[str]:
+    return [_decode_anchor_tokens(tokenizer, [int(token_id)]) for token_id in token_ids]
+
+
+def token_has_leading_whitespace(
+    raw_surface: str,
+    decoded_piece: str,
+) -> bool:
+    if decoded_piece.startswith(" "):
+        return True
+    return raw_surface.startswith(_LEADING_WHITESPACE_MARKERS)
 
 
 def _search_subsequence(
@@ -161,7 +199,6 @@ def match_anchor_span(
     tokenizer: Any,
     offsets: list[tuple[int, int]] | None = None,
 ) -> AnchorSpanMatch | None:
-    _ = text
     if offsets is not None:
         match = _match_from_offsets(
             text=text,
@@ -253,6 +290,18 @@ def compute_geometry_metrics(
     elif delta_count > 0:
         metrics["rank1_explained_variance"] = 1.0
     return metrics
+
+
+def build_computability_flags(metrics: dict[str, float | int | None]) -> dict[str, bool]:
+    return {
+        "span_mean_direction": metrics.get("delta_count") is not None and int(metrics["delta_count"] or 0) > 0,
+        "mean_direction_norm": metrics.get("mean_direction_norm") is not None,
+        "mean_step_norm": metrics.get("mean_step_norm") is not None,
+        "adjacent_cosine_coherence": metrics.get("adjacent_cosine_coherence") is not None,
+        "path_tortuosity": metrics.get("path_tortuosity") is not None,
+        "rank1_explained_variance": metrics.get("rank1_explained_variance") is not None,
+        "curvature_proxy": metrics.get("curvature_proxy") is not None,
+    }
 
 
 def compute_mean_direction(
