@@ -412,6 +412,26 @@ def test_tree_guided_generate_dispatches_trust_route(monkeypatch: pytest.MonkeyP
     assert out["geometry_route"]["cluster"] == "template"
 
 
+def test_tree_guided_generate_handles_unknown_domain_without_template() -> None:
+    model = _DummyCausalLM()
+    tokenizer = _DummyTokenizer()
+    overlay = QwenAnchorOverlay(base_model=model, cfg=TOY_CONFIG, tokenizer=tokenizer)
+
+    out = overlay.tree_guided_generate(
+        "plain unrelated prompt with no calibrated markers",
+        max_new_tokens=2,
+        max_length=32,
+        use_geometry_routing=False,
+        chunk_size=2,
+        tree_check_interval=1,
+        max_revisions=1,
+    )
+
+    assert out["domain"] == "unknown"
+    assert out["tree_guided"] is True
+    assert out["revision_count"] >= 0
+
+
 def test_qwen_overlay_can_compute_future_influence_from_texts():
     model = _DummyCausalLM()
     tokenizer = _DummyTokenizer()

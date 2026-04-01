@@ -1193,6 +1193,7 @@ class QwenAnchorOverlay(nn.Module):
             "cluster": "unknown",
             "route": "tree_guided_default",
         }
+        detected_domain = detect_tree_domain(prompt) or "unknown"
         if use_geometry_routing:
             geometry_route = self._compute_geometry_routing_decision(
                 prompt,
@@ -1213,7 +1214,7 @@ class QwenAnchorOverlay(nn.Module):
                     frequency_penalty=frequency_penalty,
                     no_repeat_ngram_size=no_repeat_ngram_size,
                 )
-                routed["domain"] = detect_tree_domain(prompt)
+                routed["domain"] = detected_domain
                 routed["revision_count"] = 0
                 routed["tree_guided"] = False
                 routed["generation_mode"] = "anchor_forced"
@@ -1230,7 +1231,7 @@ class QwenAnchorOverlay(nn.Module):
                     no_repeat_ngram_size=no_repeat_ngram_size,
                     hard_block_forbidden=hard_block_forbidden,
                 )
-                routed["domain"] = detect_tree_domain(prompt)
+                routed["domain"] = detected_domain
                 routed["revision_count"] = 0
                 routed["tree_guided"] = False
                 routed["generation_mode"] = "trust"
@@ -1264,7 +1265,7 @@ class QwenAnchorOverlay(nn.Module):
         chunk_revisions = 0
         
         # Detect domain from prompt for tree template
-        domain = detect_tree_domain(prompt)
+        domain = detected_domain
         expected_tree = get_expected_tree_template(domain) if domain != "unknown" else None
         effective_max_revisions = (
             min(int(max_revisions), 1)
