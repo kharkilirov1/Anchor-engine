@@ -37,21 +37,21 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="content_vegan_brief",
             anchor_class="content_like",
-            anchor_group="strictly_vegan_meal_plan",
-            anchor_text="strictly vegan meal plan",
+            anchor_group="strictly_vegan_meal_plan_policy",
+            anchor_text="strictly vegan meal plan policy",
             prompt=(
-                "The retreat brief requires a strictly vegan meal plan for every guest. "
+                "The retreat brief requires a strictly vegan meal plan policy for every guest. "
                 "Continue the short planning note in the same style."
             ),
-            description="Food constraint phrased as a stable content property.",
+            description="Food constraint phrased as a stable content policy.",
         ),
         _case(
             name="content_vegan_reason",
             anchor_class="content_like",
-            anchor_group="strictly_vegan_meal_plan",
-            anchor_text="strictly vegan meal plan",
+            anchor_group="strictly_vegan_meal_plan_policy",
+            anchor_text="strictly vegan meal plan policy",
             prompt=(
-                "Write one paragraph explaining why the strictly vegan meal plan excludes dairy and eggs. "
+                "Write one paragraph explaining why the strictly vegan meal plan policy excludes dairy and eggs. "
                 "Keep the explanation concise."
             ),
             description="Same content anchor in an explanatory context.",
@@ -59,10 +59,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="content_fastapi_architecture",
             anchor_class="content_like",
-            anchor_group="async_fastapi_service_design",
-            anchor_text="async FastAPI service design",
+            anchor_group="async_fastapi_service_architecture_policy",
+            anchor_text="async FastAPI service architecture policy",
             prompt=(
-                "Our backend uses an async FastAPI service design for internal APIs. "
+                "Our backend uses an async FastAPI service architecture policy for internal APIs. "
                 "Continue the technical note with one more sentence."
             ),
             description="Service identity framed as a stable system property.",
@@ -70,10 +70,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="content_fastapi_summary",
             anchor_class="content_like",
-            anchor_group="async_fastapi_service_design",
-            anchor_text="async FastAPI service design",
+            anchor_group="async_fastapi_service_architecture_policy",
+            anchor_text="async FastAPI service architecture policy",
             prompt=(
-                "Summarize the async FastAPI service design for request handling and validation. "
+                "Summarize the async FastAPI service architecture policy for request handling and validation. "
                 "Stay within the same technical frame."
             ),
             description="Same content anchor in a local documentation summary.",
@@ -81,21 +81,21 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="content_json_contract",
             anchor_class="content_like",
-            anchor_group="json_only_response_format",
-            anchor_text="JSON only response format",
+            anchor_group="json_only_response_format_policy",
+            anchor_text="JSON only response format policy",
             prompt=(
-                "The integration contract enforces a JSON only response format for every endpoint. "
+                "The integration contract enforces a JSON only response format policy for every endpoint. "
                 "Continue the guideline in one short paragraph."
             ),
-            description="Output format framed as a fixed content constraint.",
+            description="Output format framed as a fixed content policy.",
         ),
         _case(
             name="content_json_parser",
             anchor_class="content_like",
-            anchor_group="json_only_response_format",
-            anchor_text="JSON only response format",
+            anchor_group="json_only_response_format_policy",
+            anchor_text="JSON only response format policy",
             prompt=(
-                "Explain why the JSON only response format helps downstream parsers and clients. "
+                "Explain why the JSON only response format policy helps downstream parsers and clients. "
                 "Keep the wording technical and local."
             ),
             description="Same content anchor in an implementation rationale.",
@@ -103,10 +103,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="procedure_contradiction_proof",
             anchor_class="procedure_like",
-            anchor_group="proof_by_contradiction_method",
-            anchor_text="proof by contradiction method",
+            anchor_group="proof_by_contradiction_reasoning_steps",
+            anchor_text="proof by contradiction reasoning steps",
             prompt=(
-                "The proof outline says to use the proof by contradiction method for this claim. "
+                "The proof outline says to use the proof by contradiction reasoning steps for this claim. "
                 "Continue the proof sketch step by step."
             ),
             description="Proof procedure with explicit stepwise continuation pressure.",
@@ -114,10 +114,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="procedure_contradiction_explain",
             anchor_class="procedure_like",
-            anchor_group="proof_by_contradiction_method",
-            anchor_text="proof by contradiction method",
+            anchor_group="proof_by_contradiction_reasoning_steps",
+            anchor_text="proof by contradiction reasoning steps",
             prompt=(
-                "Explain why the proof by contradiction method starts from the negated claim. "
+                "Explain why the proof by contradiction reasoning steps start from the negated claim. "
                 "Keep the explanation short and procedural."
             ),
             description="Same procedure anchor in explanatory mode.",
@@ -125,10 +125,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="procedure_binary_search_note",
             anchor_class="procedure_like",
-            anchor_group="binary_search_update_loop",
-            anchor_text="binary search update loop",
+            anchor_group="binary_search_update_loop_procedure",
+            anchor_text="binary search update loop procedure",
             prompt=(
-                "The algorithm note uses a binary search update loop on a sorted array. "
+                "The algorithm note uses a binary search update loop procedure on a sorted array. "
                 "Continue the explanation with the next local step."
             ),
             description="Algorithmic procedure with iterative state changes.",
@@ -136,10 +136,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="procedure_binary_search_indices",
             anchor_class="procedure_like",
-            anchor_group="binary_search_update_loop",
-            anchor_text="binary search update loop",
+            anchor_group="binary_search_update_loop_procedure",
+            anchor_text="binary search update loop procedure",
             prompt=(
-                "Describe how the binary search update loop changes low and high indices after each comparison. "
+                "Describe how the binary search update loop procedure changes low and high indices after each comparison. "
                 "Keep the wording precise."
             ),
             description="Same procedure anchor focused on branch updates.",
@@ -147,10 +147,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="procedure_di_request_path",
             anchor_class="procedure_like",
-            anchor_group="dependency_injection_request_flow",
-            anchor_text="dependency injection request flow",
+            anchor_group="dependency_injection_request_flow_sequence",
+            anchor_text="dependency injection request flow sequence",
             prompt=(
-                "The architecture note describes a dependency injection request flow in the web service. "
+                "The architecture note describes a dependency injection request flow sequence in the web service. "
                 "Continue the explanation from request entry to handler execution."
             ),
             description="Framework procedure framed as a staged runtime flow.",
@@ -158,10 +158,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
         _case(
             name="procedure_di_summary",
             anchor_class="procedure_like",
-            anchor_group="dependency_injection_request_flow",
-            anchor_text="dependency injection request flow",
+            anchor_group="dependency_injection_request_flow_sequence",
+            anchor_text="dependency injection request flow sequence",
             prompt=(
-                "Summarize the dependency injection request flow from app startup to handler call. "
+                "Summarize the dependency injection request flow sequence from app startup to handler call. "
                 "Use one compact paragraph."
             ),
             description="Same procedure anchor in a short runtime summary.",

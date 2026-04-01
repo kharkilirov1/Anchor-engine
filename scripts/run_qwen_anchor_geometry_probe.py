@@ -954,6 +954,11 @@ def build_markdown_report(
         if result["status"] == "ok"
         and bool(result["tokenization_audit"].get("trimmed_span_has_full_geometry"))
     )
+    trimmed_geometry_note = (
+        f"- Trimming still collapses full geometry for `{len(results) - trimmed_full_geometry_count}` cases, so the stricter control also reduces metric coverage."
+        if trimmed_full_geometry_count < len(results)
+        else "- All cases retain full geometry after trimming, so the trimmed-span result is not explained by metric collapse from short spans."
+    )
     lines = [
         "# Qwen Anchor Geometry Report",
         "",
@@ -1014,7 +1019,7 @@ def build_markdown_report(
         "## Limitations",
         "",
         "- The prompt set is still small and local, so group-level conclusions can be noisy.",
-        "- Trimming removes one token from every anchor; in this prompt set only the 5-token FastAPI group keeps enough tokens for coherence, tortuosity, and rank-1 EV after trimming.",
+        trimmed_geometry_note,
         "- Cross-prompt stability is defined within the paired prompts already present in the probe, not over a large paraphrase set.",
         "- Mean-direction affinity is a diagnostic proxy and not a causal proof of polarity.",
         "- Some groups may remain transitional because the phrase itself mixes content and procedure semantics.",
