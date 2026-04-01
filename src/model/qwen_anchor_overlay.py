@@ -40,6 +40,12 @@ from src.model.anchor_tree_templates import get_expected_tree_template
 from src.model.anchor_tree_consistency import compute_graph_consistency, compute_tree_consistency
 from src.model.anchor_tree_proposals import rank_proposals_by_tree_repair
 from src.model.anchor_dependency_graph import build_anchor_dependency_graph
+from src.utils.anchor_geometry import (
+    compute_geometry_metrics,
+    extract_delta_vectors,
+    match_anchor_span,
+)
+from src.data.qwen_anchor_geometry_cases import QwenAnchorGeometryCase, make_qwen_anchor_geometry_cases
 
 
 class QwenAnchorOverlay(nn.Module):
@@ -910,6 +916,244 @@ class QwenAnchorOverlay(nn.Module):
             "steps": step_records,
         }
 
+    def _offset_mapping_to_pairs(
+        self,
+        offset_mapping: Any,
+    ) -> list[tuple[int, int]] | None:
+        if offset_mapping is None:
+            return None
+        if isinstance(offset_mapping, torch.Tensor):
+            values = offset_mapping.squeeze(0).tolist()
+            return [(int(start), int(end)) for start, end in values]
+        if isinstance(offset_mapping, list):
+            if offset_mapping and isinstance(offset_mapping[0], tuple):
+                return [(int(start), int(end)) for start, end in offset_mapping]
+            if offset_mapping and isinstance(offset_mapping[0], list):
+                if offset_mapping[0] and isinstance(offset_mapping[0][0], (list, tuple)):
+                    return [(int(start), int(end)) for start, end in offset_mapping[0]]
+                return [(int(start), int(end)) for start, end in offset_mapping]
+        return None
+
+    def _find_geometry_case_for_prompt(
+        self,
+        prompt: str,
+    ) -> QwenAnchorGeometryCase | None:
+        lowered = prompt.lower()
+        matches = [
+            case
+            for case in make_qwen_anchor_geometry_cases()
+            if case.anchor_text.lower() in lowered
+        ]
+        if not matches:
+            return None
+        matches.sort(key=lambda case: len(case.anchor_text), reverse=True)
+        return matches[0]
+
+    def _compute_geometry_routing_decision(
+        self,
+        prompt: str,
+        *,
+        max_length: int = 128,
+        mature_r1_threshold: float = 0.65,
+        template_delta_threshold: float = 0.08,
+    ) -> dict[str, Any]:
+        if self.tokenizer is None:
+            return {
+                "matched": False,
+                "cluster": "unknown",
+                "route": "tree_guided_default",
+                "reason": "missing_tokenizer",
+            }
+        case = self._find_geometry_case_for_prompt(prompt)
+        if case is None:
+            return {
+                "matched": False,
+                "cluster": "unknown",
+                "route": "tree_guided_default",
+                "reason": "no_known_anchor_text",
+            }
+        offsets = None
+        try:
+            encoded = self.tokenizer(
+                prompt,
+                truncation=True,
+                max_length=max_length,
+                return_offsets_mapping=True,
+                return_tensors="pt",
+            )
+            offsets = self._offset_mapping_to_pairs(encoded.pop("offset_mapping", None))
+        except TypeError:
+            encoded = self.tokenizer(
+                prompt,
+                truncation=True,
+                max_length=max_length,
+                return_tensors="pt",
+            )
+        device = next(self.parameters()).device
+        batch = {
+            key: value.to(device)
+            for key, value in encoded.items()
+            if isinstance(value, torch.Tensor)
+        }
+        input_ids = [int(token) for token in batch["input_ids"][0].tolist()]
+        span_match = match_anchor_span(
+            text=prompt,
+            anchor_text=case.anchor_text,
+            input_ids=input_ids,
+            tokenizer=self.tokenizer,
+            offsets=offsets,
+        )
+        if span_match is None:
+            return {
+                "matched": False,
+                "cluster": "unknown",
+                "route": "tree_guided_default",
+                "reason": "span_not_matched",
+                "anchor_group": case.anchor_group,
+                "anchor_text": case.anchor_text,
+            }
+        with torch.no_grad():
+            outputs = self.base_model(
+                input_ids=batch["input_ids"],
+                attention_mask=batch.get("attention_mask"),
+                output_hidden_states=True,
+                return_dict=True,
+            )
+        hidden_states = outputs.hidden_states
+        rank1_profile: dict[int, float | None] = {}
+        for layer in (24, 26, 27):
+            if layer + 1 >= len(hidden_states):
+                rank1_profile[layer] = None
+                continue
+            delta_vectors = extract_delta_vectors(
+                hidden_states[layer + 1][0],
+                span_match.token_start,
+                span_match.token_end,
+            )
+            metrics = compute_geometry_metrics(delta_vectors)
+            rank1_value = metrics.get("rank1_explained_variance")
+            rank1_profile[layer] = float(rank1_value) if rank1_value is not None else None
+        r1_at_24 = rank1_profile.get(24)
+        delta_l26_l27 = None
+        if rank1_profile.get(26) is not None and rank1_profile.get(27) is not None:
+            delta_l26_l27 = float(rank1_profile[27] - rank1_profile[26])
+        if r1_at_24 is not None and r1_at_24 > mature_r1_threshold:
+            cluster = "mature"
+            route = "guided_lite"
+        elif delta_l26_l27 is not None and delta_l26_l27 > template_delta_threshold:
+            cluster = "template"
+            route = "trust"
+        else:
+            cluster = "flat"
+            route = "anchor_forced"
+        return {
+            "matched": True,
+            "cluster": cluster,
+            "route": route,
+            "anchor_group": case.anchor_group,
+            "anchor_text": case.anchor_text,
+            "case_name": case.name,
+            "r1_at_24": r1_at_24,
+            "delta_l26_l27": delta_l26_l27,
+            "mature_r1_threshold": float(mature_r1_threshold),
+            "template_delta_threshold": float(template_delta_threshold),
+        }
+
+    def _generate_trust_completion(
+        self,
+        prompt: str,
+        *,
+        max_new_tokens: int,
+        max_length: int,
+        temperature: float,
+        repetition_penalty: float,
+        frequency_penalty: float,
+        no_repeat_ngram_size: int,
+        hard_block_forbidden: bool,
+    ) -> dict[str, Any]:
+        if self.tokenizer is None:
+            raise ValueError("tokenizer is required for _generate_trust_completion")
+        encoded = self.tokenizer(
+            [prompt],
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt",
+        )
+        device = next(self.parameters()).device
+        input_ids = encoded["input_ids"].to(device)
+        attention_mask = encoded["attention_mask"].to(device)
+        generated = input_ids
+        generated_mask = attention_mask
+        _, forbidden_token_ids, _ = build_bias_token_weights(
+            tokenizer=self.tokenizer,
+            vocab_size=int(self.base_model.config.vocab_size),
+            device=device,
+            prompt=prompt,
+        )
+        step_records: list[dict[str, Any]] = []
+        for _ in range(max_new_tokens):
+            outputs = self.base_model(
+                input_ids=generated,
+                attention_mask=generated_mask,
+                return_dict=True,
+            )
+            next_logits = torch.nan_to_num(outputs.logits[:, -1, :], nan=0.0, posinf=1e4, neginf=-1e4)
+            if hard_block_forbidden and forbidden_token_ids:
+                next_logits = apply_forbidden_token_penalty(
+                    logits=next_logits,
+                    forbidden_token_ids=forbidden_token_ids,
+                    penalty=float(1e6),
+                    hard_block=True,
+                )
+            next_logits = apply_repetition_penalty(
+                logits=next_logits,
+                generated_ids=generated,
+                penalty=repetition_penalty,
+            )
+            next_logits = apply_frequency_penalty(
+                logits=next_logits,
+                generated_ids=generated,
+                penalty=frequency_penalty,
+            )
+            next_logits, blocked_tokens = apply_no_repeat_ngram(
+                logits=next_logits,
+                generated_ids=generated,
+                ngram_size=no_repeat_ngram_size,
+            )
+            if temperature != 1.0:
+                next_logits = next_logits / max(float(temperature), 1e-6)
+            probs = F.softmax(next_logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+            generated = torch.cat([generated, next_token], dim=1)
+            generated_mask = torch.cat(
+                [
+                    generated_mask,
+                    torch.ones((generated_mask.size(0), 1), device=device, dtype=generated_mask.dtype),
+                ],
+                dim=1,
+            )
+            step_records.append(
+                {
+                    "token_id": int(next_token.item()),
+                    "token_text": self.tokenizer.decode([int(next_token.item())], skip_special_tokens=False),
+                    "blocked_ngram_token_count": int(len(blocked_tokens)),
+                }
+            )
+            if int(next_token.item()) == int(getattr(self.tokenizer, "eos_token_id", -1)):
+                break
+            if generated.size(1) >= max_length:
+                break
+        generated_text = self.tokenizer.decode(generated[0], skip_special_tokens=True)
+        continuation_ids = generated[0, input_ids.size(1):]
+        continuation_text = self.tokenizer.decode(continuation_ids, skip_special_tokens=True)
+        return {
+            "prompt": prompt,
+            "generated_text": generated_text,
+            "continuation_text": continuation_text,
+            "steps": step_records,
+        }
+
 
     def tree_guided_generate(
         self,
@@ -924,6 +1168,10 @@ class QwenAnchorOverlay(nn.Module):
         frequency_penalty: float = 0.05,
         no_repeat_ngram_size: int = 3,
         hard_block_forbidden: bool = True,
+        use_geometry_routing: bool = False,
+        geometry_probe_max_length: int = 128,
+        mature_r1_threshold: float = 0.65,
+        template_delta_threshold: float = 0.08,
     ) -> dict[str, Any]:
         """Tree-guided generation with structural validation.
         
@@ -938,6 +1186,56 @@ class QwenAnchorOverlay(nn.Module):
             raise ValueError("tokenizer is required for tree_guided_generate")
         
         from src.model.anchor_tree_domain import detect_tree_domain
+
+        geometry_route = {
+            "enabled": bool(use_geometry_routing),
+            "matched": False,
+            "cluster": "unknown",
+            "route": "tree_guided_default",
+        }
+        if use_geometry_routing:
+            geometry_route = self._compute_geometry_routing_decision(
+                prompt,
+                max_length=geometry_probe_max_length,
+                mature_r1_threshold=mature_r1_threshold,
+                template_delta_threshold=template_delta_threshold,
+            )
+            geometry_route["enabled"] = True
+            route_name = str(geometry_route.get("route", "tree_guided_default"))
+            if route_name == "anchor_forced":
+                routed = self.generate_with_anchor_bias(
+                    prompt=prompt,
+                    max_new_tokens=max_new_tokens,
+                    max_length=max_length,
+                    temperature=1.0,
+                    greedy=True,
+                    repetition_penalty=repetition_penalty,
+                    frequency_penalty=frequency_penalty,
+                    no_repeat_ngram_size=no_repeat_ngram_size,
+                )
+                routed["domain"] = detect_tree_domain(prompt)
+                routed["revision_count"] = 0
+                routed["tree_guided"] = False
+                routed["generation_mode"] = "anchor_forced"
+                routed["geometry_route"] = geometry_route
+                return routed
+            if route_name == "trust":
+                routed = self._generate_trust_completion(
+                    prompt=prompt,
+                    max_new_tokens=max_new_tokens,
+                    max_length=max_length,
+                    temperature=temperature,
+                    repetition_penalty=repetition_penalty,
+                    frequency_penalty=frequency_penalty,
+                    no_repeat_ngram_size=no_repeat_ngram_size,
+                    hard_block_forbidden=hard_block_forbidden,
+                )
+                routed["domain"] = detect_tree_domain(prompt)
+                routed["revision_count"] = 0
+                routed["tree_guided"] = False
+                routed["generation_mode"] = "trust"
+                routed["geometry_route"] = geometry_route
+                return routed
         
         encoded = self.tokenizer(
             [prompt],
@@ -968,6 +1266,11 @@ class QwenAnchorOverlay(nn.Module):
         # Detect domain from prompt for tree template
         domain = detect_tree_domain(prompt)
         expected_tree = get_expected_tree_template(domain) if domain != "unknown" else None
+        effective_max_revisions = (
+            min(int(max_revisions), 1)
+            if geometry_route.get("route") == "guided_lite"
+            else int(max_revisions)
+        )
         
         def validate_structure(text: str) -> tuple[bool, float, dict]:
             """Validate generated text against expected tree structure."""
@@ -1088,7 +1391,7 @@ class QwenAnchorOverlay(nn.Module):
                 })
                 
                 # If invalid and we haven't maxed revisions, rollback and retry
-                if not is_valid and revision_count < max_revisions and chunk_revisions < max_revisions:
+                if not is_valid and revision_count < effective_max_revisions and chunk_revisions < effective_max_revisions:
                     # Rollback to chunk start
                     generated = generated[:, :chunk_start_len]
                     generated_mask = generated_mask[:, :chunk_start_len]
@@ -1117,4 +1420,6 @@ class QwenAnchorOverlay(nn.Module):
             "domain": domain,
             "revision_count": revision_count,
             "tree_guided": True,
+            "generation_mode": "guided_lite" if geometry_route.get("route") == "guided_lite" else "tree_guided",
+            "geometry_route": geometry_route,
         }
