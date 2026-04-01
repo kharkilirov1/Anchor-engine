@@ -658,12 +658,101 @@ def _fmt(value: float | int | None) -> str:
     return f"{float(value):.3f}"
 
 
+def _constraint_value(case: dict[str, Any], branch: str) -> float:
+    analysis = dict(case.get(f"{branch}_analysis", {}))
+    value = analysis.get("constraint_score")
+    if value is None:
+        return 0.0
+    return float(value)
+
+
+def _policy_choice(case: dict[str, Any], policy_name: str) -> tuple[str, float]:
+    base_score = _constraint_value(case, "base")
+    anchor_score = _constraint_value(case, "anchor")
+    if policy_name == "always_base":
+        return "base", base_score
+    if policy_name == "always_anchor":
+        return "anchor", anchor_score
+    if policy_name == "failure_gated_any":
+        if base_score < 1.0:
+            return "anchor", anchor_score
+        return "base", base_score
+    if policy_name == "flat_anchor":
+        if case["anchor_cluster"] == "flat":
+            return "anchor", anchor_score
+        return "base", base_score
+    if policy_name == "flat_failure_gated":
+        if case["anchor_cluster"] == "flat" and (
+            bool(case.get("base_degenerate", False)) or base_score < 1.0
+        ):
+            return "anchor", anchor_score
+        return "base", base_score
+    raise ValueError(f"unknown policy: {policy_name}")
+
+
+def build_policy_simulation(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    policy_names = [
+        "always_base",
+        "always_anchor",
+        "failure_gated_any",
+        "flat_anchor",
+        "flat_failure_gated",
+    ]
+    subsets = {
+        "all_cases": list(cases),
+        "clean_base": [case for case in cases if not bool(case.get("base_degenerate", False))],
+        "degenerate_base": [case for case in cases if bool(case.get("base_degenerate", False))],
+    }
+    summary: dict[str, Any] = {}
+    for subset_name, subset_cases in subsets.items():
+        base_scores = [_constraint_value(case, "base") for case in subset_cases]
+        baseline_mean = float(sum(base_scores) / len(base_scores)) if base_scores else None
+        subset_result: dict[str, Any] = {}
+        for policy_name in policy_names:
+            chosen_scores: list[float] = []
+            anchor_pick_count = 0
+            wins_over_base = 0
+            losses_vs_base = 0
+            ties_vs_base = 0
+            for case in subset_cases:
+                branch, chosen_score = _policy_choice(case, policy_name)
+                base_score = _constraint_value(case, "base")
+                chosen_scores.append(chosen_score)
+                if branch == "anchor":
+                    anchor_pick_count += 1
+                if chosen_score > base_score:
+                    wins_over_base += 1
+                elif chosen_score < base_score:
+                    losses_vs_base += 1
+                else:
+                    ties_vs_base += 1
+            mean_constraint = float(sum(chosen_scores) / len(chosen_scores)) if chosen_scores else None
+            delta_vs_base = None
+            if mean_constraint is not None and baseline_mean is not None:
+                delta_vs_base = float(mean_constraint - baseline_mean)
+            subset_result[policy_name] = {
+                "n_cases": len(subset_cases),
+                "mean_constraint_score": mean_constraint,
+                "delta_vs_always_base": delta_vs_base,
+                "anchor_pick_count": anchor_pick_count,
+                "anchor_pick_rate": (
+                    float(anchor_pick_count / len(subset_cases)) if subset_cases else None
+                ),
+                "wins_over_base": wins_over_base,
+                "losses_vs_base": losses_vs_base,
+                "ties_vs_base": ties_vs_base,
+            }
+        summary[subset_name] = subset_result
+    return summary
+
+
 def build_markdown_report(
     *,
     model_name: str,
     device: str,
     cases: list[dict[str, Any]],
     calibration: dict[str, Any],
+    policy_simulation: dict[str, Any],
 ) -> str:
     cluster_counts = {
         cluster: sum(1 for case in cases if case["anchor_cluster"] == cluster)
@@ -767,6 +856,39 @@ def build_markdown_report(
     lines.extend(
         [
             "",
+            "## Policy simulation",
+            "",
+        ]
+    )
+    for subset_name, subset_summary in policy_simulation.items():
+        lines.extend(
+            [
+                f"### {subset_name}",
+                "",
+                "| policy | n_cases | mean_constraint_score | delta_vs_always_base | anchor_pick_rate | wins_over_base | losses_vs_base | ties_vs_base |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            ]
+        )
+        for policy_name, policy_stats in subset_summary.items():
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        policy_name,
+                        str(policy_stats["n_cases"]),
+                        _fmt(policy_stats["mean_constraint_score"]),
+                        _fmt(policy_stats["delta_vs_always_base"]),
+                        _fmt(policy_stats["anchor_pick_rate"]),
+                        str(policy_stats["wins_over_base"]),
+                        str(policy_stats["losses_vs_base"]),
+                        str(policy_stats["ties_vs_base"]),
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
+    lines.extend(
+        [
             f"- excluded_base_degenerate_case_names: `{calibration['excluded_base_degenerate_case_names']}`",
             "",
             f"- clean_base_observed_separation: `{calibration['threshold_candidates']['clean_base_observed_separation']}`",
@@ -872,6 +994,7 @@ def main() -> None:
         if record is not None:
             records.append(record)
             calibration = build_calibration_summary(records)
+            policy_simulation = build_policy_simulation(records)
             payload = {
                 "metadata": {
                     "created_at_utc": datetime.now(UTC).isoformat(),
@@ -884,12 +1007,14 @@ def main() -> None:
                 },
                 "cases": records,
                 "calibration": calibration,
+                "policy_simulation": policy_simulation,
             }
             report = build_markdown_report(
                 model_name=args.model,
                 device=args.device,
                 cases=records,
                 calibration=calibration,
+                policy_simulation=policy_simulation,
             )
             write_outputs(
                 output_json=args.output_json,
@@ -899,6 +1024,7 @@ def main() -> None:
             )
 
     calibration = build_calibration_summary(records)
+    policy_simulation = build_policy_simulation(records)
     payload = {
         "metadata": {
             "created_at_utc": datetime.now(UTC).isoformat(),
@@ -911,12 +1037,14 @@ def main() -> None:
         },
         "cases": records,
         "calibration": calibration,
+        "policy_simulation": policy_simulation,
     }
     report = build_markdown_report(
         model_name=args.model,
         device=args.device,
         cases=records,
         calibration=calibration,
+        policy_simulation=policy_simulation,
     )
 
     write_outputs(

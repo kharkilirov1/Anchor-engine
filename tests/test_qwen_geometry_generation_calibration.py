@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from scripts.run_qwen_geometry_generation_calibration import (
     KEYWORD_MAP,
     build_calibration_summary,
+    build_policy_simulation,
     compute_constraint_analysis,
 )
 
@@ -86,3 +89,37 @@ def test_build_calibration_summary_excludes_degenerate_bases() -> None:
     assert flat_rescue["n_selected"] == 1
     assert flat_rescue["mean_constraint_delta"] == -1.0
     assert summary["threshold_candidates"]["clean_base_observed_separation"] is False
+
+
+def test_build_policy_simulation_surfaces_flat_failure_gated_rescue() -> None:
+    cases = [
+        {
+            "name": "flat_failed",
+            "anchor_cluster": "flat",
+            "base_degenerate": True,
+            "base_analysis": {"constraint_score": 0.0},
+            "anchor_analysis": {"constraint_score": 1.0},
+        },
+        {
+            "name": "template_clean",
+            "anchor_cluster": "template",
+            "base_degenerate": False,
+            "base_analysis": {"constraint_score": 1.0},
+            "anchor_analysis": {"constraint_score": 0.0},
+        },
+        {
+            "name": "mature_clean",
+            "anchor_cluster": "mature",
+            "base_degenerate": False,
+            "base_analysis": {"constraint_score": 1.0},
+            "anchor_analysis": {"constraint_score": 1.0},
+        },
+    ]
+    simulation = build_policy_simulation(cases)
+    all_cases = simulation["all_cases"]
+    assert all_cases["always_base"]["mean_constraint_score"] == 2.0 / 3.0
+    assert all_cases["always_anchor"]["mean_constraint_score"] == 2.0 / 3.0
+    assert all_cases["flat_failure_gated"]["mean_constraint_score"] == 1.0
+    assert all_cases["flat_failure_gated"]["delta_vs_always_base"] == pytest.approx(1.0 / 3.0)
+    assert all_cases["flat_failure_gated"]["anchor_pick_count"] == 1
+    assert simulation["degenerate_base"]["flat_failure_gated"]["mean_constraint_score"] == 1.0
