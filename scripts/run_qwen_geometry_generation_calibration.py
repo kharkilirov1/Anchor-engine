@@ -565,11 +565,21 @@ def analyze_case(
     }
 
 
-def _cluster_summary(cases: list[dict[str, Any]], cluster: str) -> dict[str, Any]:
+def _cluster_summary(
+    cases: list[dict[str, Any]],
+    cluster: str,
+    *,
+    selector: str = "included_in_calibration",
+) -> dict[str, Any]:
     cluster_cases = [case for case in cases if case["anchor_cluster"] == cluster]
-    included_cases = [case for case in cluster_cases if case.get("included_in_calibration", False)]
-    deltas = [float(case["constraint_delta"]) for case in included_cases if case["constraint_delta"] is not None]
-    drifts = [1.0 if case["anchor_analysis"]["drift_detected"] else 0.0 for case in included_cases]
+    if selector == "all":
+        selected_cases = list(cluster_cases)
+    elif selector == "base_degenerate":
+        selected_cases = [case for case in cluster_cases if case.get("base_degenerate", False)]
+    else:
+        selected_cases = [case for case in cluster_cases if case.get("included_in_calibration", False)]
+    deltas = [float(case["constraint_delta"]) for case in selected_cases if case["constraint_delta"] is not None]
+    drifts = [1.0 if case["anchor_analysis"]["drift_detected"] else 0.0 for case in selected_cases]
     r1_values = [float(case["r1_at_24"]) for case in cluster_cases if case["r1_at_24"] is not None]
     excluded_case_names = [case["name"] for case in cluster_cases if not case.get("included_in_calibration", False)]
     wins = sum(1 for delta in deltas if delta > 0)
@@ -578,9 +588,18 @@ def _cluster_summary(cases: list[dict[str, Any]], cluster: str) -> dict[str, Any
     median_constraint_delta = None
     if deltas:
         median_constraint_delta = float(np.median(np.array(deltas, dtype=np.float64)))
+    rescue_successes = sum(
+        1
+        for case in selected_cases
+        if float(dict(case.get("base_analysis", {})).get("constraint_score") or 0.0) == 0.0
+        and float(dict(case.get("anchor_analysis", {})).get("constraint_score") or 0.0) == 1.0
+    )
+    rescue_rate = None
+    if selected_cases:
+        rescue_rate = float(rescue_successes / len(selected_cases))
     return {
         "n_total": len(cluster_cases),
-        "n_included": len(included_cases),
+        "n_selected": len(selected_cases),
         "mean_constraint_delta": float(sum(deltas) / len(deltas)) if deltas else None,
         "median_constraint_delta": median_constraint_delta,
         "mean_drift_rate": float(sum(drifts) / len(drifts)) if drifts else None,
@@ -588,29 +607,45 @@ def _cluster_summary(cases: list[dict[str, Any]], cluster: str) -> dict[str, Any
         "wins": wins,
         "losses": losses,
         "ties": ties,
+        "rescue_rate": rescue_rate,
         "excluded_case_names": excluded_case_names,
     }
 
 
 def build_calibration_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
-    by_cluster = {cluster: _cluster_summary(cases, cluster) for cluster in ("mature", "template", "flat")}
-    flat_mean = by_cluster["flat"]["mean_constraint_delta"]
-    template_mean = by_cluster["template"]["mean_constraint_delta"]
-    mature_mean = by_cluster["mature"]["mean_constraint_delta"]
-    observed_separation = False
+    by_cluster_all_cases = {
+        cluster: _cluster_summary(cases, cluster, selector="all")
+        for cluster in ("mature", "template", "flat")
+    }
+    by_cluster_clean_base = {
+        cluster: _cluster_summary(cases, cluster, selector="included_in_calibration")
+        for cluster in ("mature", "template", "flat")
+    }
+    by_cluster_degenerate_base = {
+        cluster: _cluster_summary(cases, cluster, selector="base_degenerate")
+        for cluster in ("mature", "template", "flat")
+    }
+    flat_mean = by_cluster_clean_base["flat"]["mean_constraint_delta"]
+    template_mean = by_cluster_clean_base["template"]["mean_constraint_delta"]
+    mature_mean = by_cluster_clean_base["mature"]["mean_constraint_delta"]
+    clean_base_observed_separation = False
     if flat_mean is not None and template_mean is not None and mature_mean is not None:
-        observed_separation = bool(flat_mean < min(template_mean, mature_mean))
+        clean_base_observed_separation = bool(flat_mean < min(template_mean, mature_mean))
     return {
         "n_total_cases": len(cases),
         "n_included_cases": sum(1 for case in cases if case.get("included_in_calibration", False)),
         "excluded_base_degenerate_case_names": [
             case["name"] for case in cases if case.get("base_degenerate", False)
         ],
-        "by_cluster": by_cluster,
+        "by_cluster": by_cluster_clean_base,
+        "by_cluster_all_cases": by_cluster_all_cases,
+        "by_cluster_clean_base": by_cluster_clean_base,
+        "by_cluster_degenerate_base": by_cluster_degenerate_base,
         "threshold_candidates": {
             "r1_at_24_mature_threshold": 0.65,
             "delta_l26_l27_template_threshold": 0.08,
-            "observed_separation": observed_separation,
+            "observed_separation": clean_base_observed_separation,
+            "clean_base_observed_separation": clean_base_observed_separation,
         },
     }
 
@@ -678,21 +713,22 @@ def build_markdown_report(
             "",
             "## Calibration summary",
             "",
-            "| cluster | n_total | n_included | mean_constraint_delta | median_constraint_delta | mean_drift_rate | wins | losses | ties | r1_at_24_range |",
-            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| cluster | n_total | n_selected | mean_constraint_delta | median_constraint_delta | mean_drift_rate | rescue_rate | wins | losses | ties | r1_at_24_range |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
-    for cluster, summary in calibration["by_cluster"].items():
+    for cluster, summary in calibration["by_cluster_clean_base"].items():
         lines.append(
             "| "
             + " | ".join(
                 [
                     cluster,
                     str(summary["n_total"]),
-                    str(summary["n_included"]),
+                    str(summary["n_selected"]),
                     _fmt(summary["mean_constraint_delta"]),
                     _fmt(summary["median_constraint_delta"]),
                     _fmt(summary["mean_drift_rate"]),
+                    _fmt(summary["rescue_rate"]),
                     str(summary["wins"]),
                     str(summary["losses"]),
                     str(summary["ties"]),
@@ -704,13 +740,40 @@ def build_markdown_report(
     lines.extend(
         [
             "",
+            "## Degenerate-base rescue summary",
+            "",
+            "| cluster | n_total | n_selected | mean_constraint_delta | median_constraint_delta | rescue_rate | wins | losses | ties |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for cluster, summary in calibration["by_cluster_degenerate_base"].items():
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    cluster,
+                    str(summary["n_total"]),
+                    str(summary["n_selected"]),
+                    _fmt(summary["mean_constraint_delta"]),
+                    _fmt(summary["median_constraint_delta"]),
+                    _fmt(summary["rescue_rate"]),
+                    str(summary["wins"]),
+                    str(summary["losses"]),
+                    str(summary["ties"]),
+                ]
+            )
+            + " |"
+        )
+    lines.extend(
+        [
+            "",
             f"- excluded_base_degenerate_case_names: `{calibration['excluded_base_degenerate_case_names']}`",
             "",
-            f"- observed_separation: `{calibration['threshold_candidates']['observed_separation']}`",
+            f"- clean_base_observed_separation: `{calibration['threshold_candidates']['clean_base_observed_separation']}`",
             "",
             "## Conclusion",
             "",
-            f"Current data {'support' if calibration['threshold_candidates']['observed_separation'] else 'do not support'} the thresholds `0.65 / 0.08` as a clean routing split after excluding degenerate-base calibration failures.",
+            f"Current data {'support' if calibration['threshold_candidates']['clean_base_observed_separation'] else 'do not support'} the thresholds `0.65 / 0.08` as a clean routing split on non-degenerate-base cases; degenerate-base rescue cases are reported separately.",
             "",
         ]
     )

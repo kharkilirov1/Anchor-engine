@@ -75,10 +75,14 @@ def test_build_calibration_summary_excludes_degenerate_bases() -> None:
         },
     ]
     summary = build_calibration_summary(cases)
-    flat = summary["by_cluster"]["flat"]
+    flat = summary["by_cluster_clean_base"]["flat"]
+    flat_rescue = summary["by_cluster_degenerate_base"]["flat"]
     assert summary["excluded_base_degenerate_case_names"] == ["degenerate_flat"]
     assert flat["n_total"] == 2
-    assert flat["n_included"] == 1
+    assert flat["n_selected"] == 1
     assert flat["mean_constraint_delta"] == 1.0
     assert flat["median_constraint_delta"] == 1.0
     assert flat["excluded_case_names"] == ["degenerate_flat"]
+    assert flat_rescue["n_selected"] == 1
+    assert flat_rescue["mean_constraint_delta"] == -1.0
+    assert summary["threshold_candidates"]["clean_base_observed_separation"] is False
