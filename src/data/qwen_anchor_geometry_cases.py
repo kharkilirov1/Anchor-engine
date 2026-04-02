@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+ANCHOR_SPAN_PROFILES: tuple[str, ...] = ("short", "medium", "long")
+
+
 @dataclass(frozen=True)
 class QwenAnchorGeometryCase:
     name: str
@@ -32,13 +35,68 @@ def _case(
     )
 
 
-def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
+ANCHOR_TEXT_BY_GROUP: dict[str, dict[str, str]] = {
+    "strictly_vegan_meal_plan_policy": {
+        "short": "vegan meal plan policy",
+        "medium": "strictly vegan meal plan policy",
+        "long": "strictly vegan meal plan policy for every guest",
+    },
+    "async_fastapi_service_architecture_policy": {
+        "short": "FastAPI service architecture policy",
+        "medium": "async FastAPI service architecture policy",
+        "long": "async FastAPI service architecture policy for internal APIs",
+    },
+    "json_only_response_format_policy": {
+        "short": "JSON response format policy",
+        "medium": "JSON only response format policy",
+        "long": "JSON only response format policy for every endpoint",
+    },
+    "proof_by_contradiction_reasoning_steps": {
+        "short": "contradiction reasoning steps",
+        "medium": "proof by contradiction reasoning steps",
+        "long": "proof by contradiction reasoning steps for the claim",
+    },
+    "binary_search_update_loop_procedure": {
+        "short": "search update loop procedure",
+        "medium": "binary search update loop procedure",
+        "long": "binary search update loop procedure on a sorted array",
+    },
+    "dependency_injection_request_flow_sequence": {
+        "short": "injection request flow sequence",
+        "medium": "dependency injection request flow sequence",
+        "long": "dependency injection request flow sequence in a web service",
+    },
+}
+
+
+def list_anchor_span_profiles() -> tuple[str, ...]:
+    return ANCHOR_SPAN_PROFILES
+
+
+def _anchor_text_for_profile(anchor_group: str, anchor_span_profile: str) -> str:
+    profile_map = ANCHOR_TEXT_BY_GROUP.get(anchor_group)
+    if profile_map is None:
+        raise KeyError(f"unknown anchor group: {anchor_group}")
+    try:
+        return profile_map[anchor_span_profile]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown anchor span profile: {anchor_span_profile}; expected one of {ANCHOR_SPAN_PROFILES}"
+        ) from exc
+
+
+def make_qwen_anchor_geometry_cases(
+    anchor_span_profile: str = "long",
+) -> list[QwenAnchorGeometryCase]:
     return [
         _case(
             name="content_vegan_brief",
             anchor_class="content_like",
             anchor_group="strictly_vegan_meal_plan_policy",
-            anchor_text="strictly vegan meal plan policy for every guest",
+            anchor_text=_anchor_text_for_profile(
+                "strictly_vegan_meal_plan_policy",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The retreat brief requires a strictly vegan meal plan policy for every guest. "
                 "Write a welcoming note explaining what guests can expect at meals, keeping the message consistent with a plant-based menu "
@@ -50,7 +108,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="content_vegan_reason",
             anchor_class="content_like",
             anchor_group="strictly_vegan_meal_plan_policy",
-            anchor_text="strictly vegan meal plan policy for every guest",
+            anchor_text=_anchor_text_for_profile(
+                "strictly_vegan_meal_plan_policy",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The retreat brief requires a strictly vegan meal plan policy for every guest. "
                 "Write a short explanation for attendees about why the meals stay plant-based and what substitutions they can expect instead "
@@ -62,7 +123,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="content_fastapi_architecture",
             anchor_class="content_like",
             anchor_group="async_fastapi_service_architecture_policy",
-            anchor_text="async FastAPI service architecture policy for internal APIs",
+            anchor_text=_anchor_text_for_profile(
+                "async_fastapi_service_architecture_policy",
+                anchor_span_profile,
+            ),
             prompt=(
                 "Our backend uses an async FastAPI service architecture policy for internal APIs. "
                 "Write a short engineering note describing how requests move through the service, how dependencies are injected, "
@@ -74,7 +138,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="content_fastapi_summary",
             anchor_class="content_like",
             anchor_group="async_fastapi_service_architecture_policy",
-            anchor_text="async FastAPI service architecture policy for internal APIs",
+            anchor_text=_anchor_text_for_profile(
+                "async_fastapi_service_architecture_policy",
+                anchor_span_profile,
+            ),
             prompt=(
                 "Our backend uses an async FastAPI service architecture policy for internal APIs. "
                 "Write a compact onboarding summary for a new teammate covering async request handling, dependency injection, "
@@ -86,7 +153,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="content_json_contract",
             anchor_class="content_like",
             anchor_group="json_only_response_format_policy",
-            anchor_text="JSON only response format policy for every endpoint",
+            anchor_text=_anchor_text_for_profile(
+                "json_only_response_format_policy",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The integration contract enforces a JSON only response format policy for every endpoint. "
                 "Write a short implementation note explaining what clients can expect from responses, how serialization should behave, "
@@ -98,7 +168,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="content_json_parser",
             anchor_class="content_like",
             anchor_group="json_only_response_format_policy",
-            anchor_text="JSON only response format policy for every endpoint",
+            anchor_text=_anchor_text_for_profile(
+                "json_only_response_format_policy",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The integration contract enforces a JSON only response format policy for every endpoint. "
                 "Write a brief note for client developers about why this helps downstream parsers and keeps schema handling predictable. "
@@ -110,7 +183,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="procedure_contradiction_proof",
             anchor_class="procedure_like",
             anchor_group="proof_by_contradiction_reasoning_steps",
-            anchor_text="proof by contradiction reasoning steps for the claim",
+            anchor_text=_anchor_text_for_profile(
+                "proof_by_contradiction_reasoning_steps",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The proof outline says to use the proof by contradiction reasoning steps for the claim that if n^2 is even then n is even. "
                 "Continue the outline from the negated claim to the contradiction, keeping the reasoning explicit and procedural."
@@ -121,7 +197,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="procedure_contradiction_explain",
             anchor_class="procedure_like",
             anchor_group="proof_by_contradiction_reasoning_steps",
-            anchor_text="proof by contradiction reasoning steps for the claim",
+            anchor_text=_anchor_text_for_profile(
+                "proof_by_contradiction_reasoning_steps",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The proof outline uses the proof by contradiction reasoning steps for the claim under discussion. "
                 "Write a short explanation for a student about why the method begins by assuming the negated claim and why reaching a contradiction finishes the argument."
@@ -132,7 +211,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="procedure_contradiction_surd_sum",
             anchor_class="procedure_like",
             anchor_group="proof_by_contradiction_reasoning_steps",
-            anchor_text="proof by contradiction reasoning steps for the claim",
+            anchor_text=_anchor_text_for_profile(
+                "proof_by_contradiction_reasoning_steps",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The proof outline uses the proof by contradiction reasoning steps for the claim that sqrt(2) + sqrt(3) is irrational. "
                 "Continue the proof in an elementary-algebra style and make the contradiction explicit. "
@@ -144,7 +226,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="procedure_binary_search_note",
             anchor_class="procedure_like",
             anchor_group="binary_search_update_loop_procedure",
-            anchor_text="binary search update loop procedure on a sorted array",
+            anchor_text=_anchor_text_for_profile(
+                "binary_search_update_loop_procedure",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The algorithm note uses a binary search update loop procedure on a sorted array. "
                 "Continue the note by describing how mid is computed, how it is compared to the target, and how the search interval shrinks. "
@@ -156,7 +241,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="procedure_binary_search_indices",
             anchor_class="procedure_like",
             anchor_group="binary_search_update_loop_procedure",
-            anchor_text="binary search update loop procedure on a sorted array",
+            anchor_text=_anchor_text_for_profile(
+                "binary_search_update_loop_procedure",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The algorithm note uses a binary search update loop procedure on a sorted array. "
                 "Write a brief walkthrough of how low and high change after each comparison, including the cases target < arr[mid], "
@@ -168,7 +256,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="procedure_di_request_path",
             anchor_class="procedure_like",
             anchor_group="dependency_injection_request_flow_sequence",
-            anchor_text="dependency injection request flow sequence in a web service",
+            anchor_text=_anchor_text_for_profile(
+                "dependency_injection_request_flow_sequence",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The architecture note describes a dependency injection request flow sequence in a web service. "
                 "Continue the note from request entry to handler execution. "
@@ -181,7 +272,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             name="procedure_di_summary",
             anchor_class="procedure_like",
             anchor_group="dependency_injection_request_flow_sequence",
-            anchor_text="dependency injection request flow sequence in a web service",
+            anchor_text=_anchor_text_for_profile(
+                "dependency_injection_request_flow_sequence",
+                anchor_span_profile,
+            ),
             prompt=(
                 "The architecture note describes a dependency injection request flow sequence in a web service. "
                 "Write a short onboarding summary from app startup to handler call, mentioning startup wiring, provider registration, "
