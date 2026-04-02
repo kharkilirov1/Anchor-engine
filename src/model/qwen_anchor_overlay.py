@@ -1001,6 +1001,7 @@ class QwenAnchorOverlay(nn.Module):
         max_length: int = 128,
         mature_r1_threshold: float = 0.65,
         template_delta_threshold: float = 0.08,
+        reference_layers: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         if self.tokenizer is None:
             return {
@@ -1069,9 +1070,24 @@ class QwenAnchorOverlay(nn.Module):
             num_hidden_layers=int(self.model_num_hidden_layers),
             count=10,
         )
-        reference_layers = build_tail_reference_layers(probe_layers)
+        resolved_reference_layers = (
+            {
+                key: int(value)
+                for key, value in dict(reference_layers).items()
+            }
+            if isinstance(reference_layers, dict) and reference_layers
+            else build_tail_reference_layers(probe_layers)
+        )
         rank1_profile: dict[int, float | None] = {}
-        for layer in probe_layers:
+        required_probe_layers = sorted(
+            {
+                *probe_layers,
+                int(resolved_reference_layers["mature_layer"]),
+                int(resolved_reference_layers["template_prev_layer"]),
+                int(resolved_reference_layers["template_curr_layer"]),
+            }
+        )
+        for layer in required_probe_layers:
             if layer + 1 >= len(hidden_states):
                 rank1_profile[layer] = None
                 continue
@@ -1083,9 +1099,9 @@ class QwenAnchorOverlay(nn.Module):
             metrics = compute_geometry_metrics(delta_vectors)
             rank1_value = metrics.get("rank1_explained_variance")
             rank1_profile[layer] = float(rank1_value) if rank1_value is not None else None
-        mature_layer = int(reference_layers["mature_layer"])
-        template_prev_layer = int(reference_layers["template_prev_layer"])
-        template_curr_layer = int(reference_layers["template_curr_layer"])
+        mature_layer = int(resolved_reference_layers["mature_layer"])
+        template_prev_layer = int(resolved_reference_layers["template_prev_layer"])
+        template_curr_layer = int(resolved_reference_layers["template_curr_layer"])
         r1_reference = rank1_profile.get(mature_layer)
         delta_template_pair = None
         if rank1_profile.get(template_prev_layer) is not None and rank1_profile.get(template_curr_layer) is not None:
@@ -1106,8 +1122,8 @@ class QwenAnchorOverlay(nn.Module):
             "anchor_group": case.anchor_group,
             "anchor_text": case.anchor_text,
             "case_name": case.name,
-            "probe_layers": probe_layers,
-            "reference_layers": reference_layers,
+            "probe_layers": required_probe_layers,
+            "reference_layers": resolved_reference_layers,
             "r1_reference": r1_reference,
             "delta_template_pair": delta_template_pair,
             "mature_r1_threshold": float(mature_r1_threshold),
@@ -1227,6 +1243,7 @@ class QwenAnchorOverlay(nn.Module):
         geometry_probe_max_length: int = 128,
         mature_r1_threshold: float = 0.65,
         template_delta_threshold: float = 0.08,
+        geometry_reference_layers: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         """Tree-guided generation with structural validation.
         
@@ -1255,6 +1272,7 @@ class QwenAnchorOverlay(nn.Module):
                 max_length=geometry_probe_max_length,
                 mature_r1_threshold=mature_r1_threshold,
                 template_delta_threshold=template_delta_threshold,
+                reference_layers=geometry_reference_layers,
             )
             geometry_route["enabled"] = True
             route_name = str(geometry_route.get("route", "tree_guided_default"))
