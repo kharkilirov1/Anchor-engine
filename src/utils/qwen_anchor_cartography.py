@@ -187,8 +187,9 @@ def project_out_basis(vector: torch.Tensor, basis: torch.Tensor | None) -> torch
     projected = vector.to(dtype=torch.float32)
     if basis is None or basis.numel() == 0:
         return projected
-    for idx in range(basis.size(1)):
-        direction = basis[:, idx]
+    basis_local = basis.to(device=projected.device, dtype=torch.float32)
+    for idx in range(basis_local.size(1)):
+        direction = basis_local[:, idx]
         norm = float(direction.norm().item())
         if norm <= _EPS:
             continue
