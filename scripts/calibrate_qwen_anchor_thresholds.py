@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 from src.data.qwen_probe_cases import QwenProbeCase, make_qwen_probe_cases
 from src.model.config import TOY_CONFIG
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
+from src.model.qwen_model_support import get_config_attr
 from scripts.run_qwen_anchor_probe import summarize_results
 
 
@@ -117,9 +118,9 @@ def evaluate_configuration(
     torch.manual_seed(init_seed)
     cfg = replace(
         TOY_CONFIG,
-        d_model=int(getattr(base_model.config, "hidden_size")),
-        vocab_size=int(getattr(base_model.config, "vocab_size")),
-        max_seq_len=int(getattr(base_model.config, "max_position_embeddings", getattr(base_model.config, "max_seq_len", 32768))),
+        d_model=int(get_config_attr(base_model.config, "hidden_size")),
+        vocab_size=int(get_config_attr(base_model.config, "vocab_size")),
+        max_seq_len=int(get_config_attr(base_model.config, "max_position_embeddings", get_config_attr(base_model.config, "max_seq_len", 32768))),
         anchor_threshold=anchor_threshold,
         anchor_revision_threshold=revision_threshold,
         anchor_contradiction_threshold=contradiction_threshold,
