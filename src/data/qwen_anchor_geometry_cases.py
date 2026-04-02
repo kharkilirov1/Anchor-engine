@@ -41,10 +41,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_text="strictly vegan meal plan policy",
             prompt=(
                 "The retreat brief requires a strictly vegan meal plan policy for every guest. "
-                "Write exactly two policy sentences that ban dairy, eggs, and meat, and mention plant-based alternatives. "
-                "Do not add dialogue, headers, or extra tasks."
+                "Write a welcoming note explaining what guests can expect at meals, keeping the message consistent with a plant-based menu "
+                "and avoiding dairy, eggs, and meat."
             ),
-            description="Food constraint phrased as a concrete local policy note.",
+            description="Open-ended meal note anchored to a concrete vegan policy constraint.",
         ),
         _case(
             name="content_vegan_reason",
@@ -52,10 +52,11 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_group="strictly_vegan_meal_plan_policy",
             anchor_text="strictly vegan meal plan policy",
             prompt=(
-                "Explain in exactly three sentences why the strictly vegan meal plan policy excludes dairy and eggs. "
-                "Focus only on the policy rationale and plant-based substitutions."
+                "The retreat brief requires a strictly vegan meal plan policy for every guest. "
+                "Write a short explanation for attendees about why the meals stay plant-based and what substitutions they can expect instead "
+                "of dairy or eggs."
             ),
-            description="Same content anchor in a tightly scoped rationale.",
+            description="Open-ended rationale anchored to the same vegan policy.",
         ),
         _case(
             name="content_fastapi_architecture",
@@ -64,10 +65,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_text="async FastAPI service architecture policy",
             prompt=(
                 "Our backend uses an async FastAPI service architecture policy for internal APIs. "
-                "Write exactly three technical sentences about request flow, dependency injection, and Pydantic validation in Python. "
-                "Do not mention Java, Spring, SOAP, or product management."
+                "Write a short engineering note describing how requests move through the service, how dependencies are injected, "
+                "and how Pydantic validation fits into the Python flow. Do not switch to Java, Spring, or SOAP terminology."
             ),
-            description="Service identity framed as a tightly constrained Python note.",
+            description="Open-ended Python architecture note anchored to the FastAPI service policy.",
         ),
         _case(
             name="content_fastapi_summary",
@@ -75,10 +76,11 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_group="async_fastapi_service_architecture_policy",
             anchor_text="async FastAPI service architecture policy",
             prompt=(
-                "Summarize the async FastAPI service architecture policy in exactly three technical sentences. "
-                "Stay in Python and FastAPI terms and mention async request handling plus schema validation."
+                "Our backend uses an async FastAPI service architecture policy for internal APIs. "
+                "Write a compact onboarding summary for a new teammate covering async request handling, dependency injection, "
+                "and schema validation in Python."
             ),
-            description="Same content anchor in a more explicit local documentation summary.",
+            description="Open-ended onboarding summary anchored to the same FastAPI policy.",
         ),
         _case(
             name="content_json_contract",
@@ -87,10 +89,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_text="JSON only response format policy",
             prompt=(
                 "The integration contract enforces a JSON only response format policy for every endpoint. "
-                "Write exactly three technical sentences explaining content type, serialization, and parser expectations. "
-                "Do not mention HTML, markdown, or Java."
+                "Write a short implementation note explaining what clients can expect from responses, how serialization should behave, "
+                "and what parsers rely on. Keep it in API and JSON terms, not HTML or markdown."
             ),
-            description="Output format framed as a fixed content contract with explicit scope.",
+            description="Open-ended API note anchored to the JSON response contract.",
         ),
         _case(
             name="content_json_parser",
@@ -98,10 +100,11 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_group="json_only_response_format_policy",
             anchor_text="JSON only response format policy",
             prompt=(
-                "Explain in exactly three sentences why the JSON only response format policy helps downstream parsers and API clients. "
-                "Keep the answer local to response decoding and schema consistency."
+                "The integration contract enforces a JSON only response format policy for every endpoint. "
+                "Write a brief note for client developers about why this helps downstream parsers and keeps schema handling predictable. "
+                "Keep the discussion local to decoding and response structure."
             ),
-            description="Same content anchor in a constrained implementation rationale.",
+            description="Open-ended parser-facing rationale anchored to the same JSON policy.",
         ),
         _case(
             name="procedure_contradiction_proof",
@@ -110,9 +113,9 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_text="proof by contradiction reasoning steps",
             prompt=(
                 "The proof outline says to use the proof by contradiction reasoning steps for the claim that if n^2 is even then n is even. "
-                "Write exactly four short proof steps, starting from the negated claim and ending with the contradiction."
+                "Continue the outline from the negated claim to the contradiction, keeping the reasoning explicit and procedural."
             ),
-            description="Procedure anchor grounded in a concrete classical proof.",
+            description="Open-ended contradiction proof anchored to a concrete classical claim.",
         ),
         _case(
             name="procedure_contradiction_explain",
@@ -120,10 +123,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_group="proof_by_contradiction_reasoning_steps",
             anchor_text="proof by contradiction reasoning steps",
             prompt=(
-                "Explain in exactly three sentences why the proof by contradiction reasoning steps start from the negated claim. "
-                "Keep the explanation procedural and mention the contradiction endpoint."
+                "The proof outline uses the proof by contradiction reasoning steps. "
+                "Write a short explanation for a student about why the method begins by assuming the negated claim and why reaching a contradiction finishes the argument."
             ),
-            description="Same procedure anchor in a constrained explanatory mode.",
+            description="Open-ended student explanation anchored to contradiction procedure.",
         ),
         _case(
             name="procedure_contradiction_surd_sum",
@@ -132,10 +135,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_text="proof by contradiction reasoning steps",
             prompt=(
                 "The proof outline uses the proof by contradiction reasoning steps for the claim that sqrt(2) + sqrt(3) is irrational. "
-                "Write exactly five proof steps using only elementary algebra, and end with an explicit contradiction. "
+                "Continue the proof in an elementary-algebra style and make the contradiction explicit. "
                 "Do not switch to numerical approximation."
             ),
-            description="Harder concrete contradiction proof intended to stress a small model.",
+            description="Open-ended harder contradiction proof anchored to an irrationality claim.",
         ),
         _case(
             name="procedure_binary_search_note",
@@ -144,10 +147,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_text="binary search update loop procedure",
             prompt=(
                 "The algorithm note uses a binary search update loop procedure on a sorted array. "
-                "Write exactly three steps describing how mid is computed, compared to the target, and how the search interval shrinks. "
+                "Continue the note by describing how mid is computed, how it is compared to the target, and how the search interval shrinks. "
                 "Do not switch to other algorithms."
             ),
-            description="Algorithmic procedure with explicit local update steps.",
+            description="Open-ended algorithm note anchored to binary search updates.",
         ),
         _case(
             name="procedure_binary_search_indices",
@@ -155,10 +158,11 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_group="binary_search_update_loop_procedure",
             anchor_text="binary search update loop procedure",
             prompt=(
-                "Describe in exactly three sentences how the binary search update loop procedure changes low and high after each comparison. "
-                "Mention the cases target < arr[mid], target > arr[mid], and equality."
+                "The algorithm note uses a binary search update loop procedure on a sorted array. "
+                "Write a brief walkthrough of how low and high change after each comparison, including the cases target < arr[mid], "
+                "target > arr[mid], and equality."
             ),
-            description="Same procedure anchor focused on the precise branch updates.",
+            description="Open-ended walkthrough anchored to precise binary search branch updates.",
         ),
         _case(
             name="procedure_di_request_path",
@@ -167,11 +171,11 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_text="dependency injection request flow sequence",
             prompt=(
                 "The architecture note describes a dependency injection request flow sequence in a Python web service. "
-                "Write exactly four steps from request entry to handler execution. "
+                "Continue the note from request entry to handler execution. "
                 "Mention container resolution, injected service construction, and handler call. "
                 "Do not mention SOAP, Java, or reflection."
             ),
-            description="Framework procedure framed as a staged Python runtime flow.",
+            description="Open-ended runtime flow note anchored to the DI request sequence.",
         ),
         _case(
             name="procedure_di_summary",
@@ -179,9 +183,10 @@ def make_qwen_anchor_geometry_cases() -> list[QwenAnchorGeometryCase]:
             anchor_group="dependency_injection_request_flow_sequence",
             anchor_text="dependency injection request flow sequence",
             prompt=(
-                "Summarize the dependency injection request flow sequence from app startup to handler call in exactly four sentences. "
-                "Stay in Python web-service terms and mention startup wiring, provider registration, request resolution, and handler invocation."
+                "The architecture note describes a dependency injection request flow sequence in a Python web service. "
+                "Write a short onboarding summary from app startup to handler call, mentioning startup wiring, provider registration, "
+                "request resolution, and handler invocation."
             ),
-            description="Same procedure anchor in a compact but explicit runtime summary.",
+            description="Open-ended onboarding summary anchored to the same DI flow.",
         ),
     ]
