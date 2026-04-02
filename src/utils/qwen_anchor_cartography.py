@@ -161,6 +161,28 @@ def compute_neutral_basis(
         return None
 
 
+def build_neutral_basis_by_layer(
+    *,
+    layers: list[int],
+    case_names: list[str],
+    encodings: dict[str, SpanEncoding],
+    max_components: int = 3,
+    variance_cutoff: float = 0.5,
+) -> dict[int, torch.Tensor | None]:
+    payload: dict[int, torch.Tensor | None] = {}
+    for layer in layers:
+        neutral_vectors = [
+            span_mean_hidden_for_layer(encodings[case_name], layer=int(layer))
+            for case_name in case_names
+        ]
+        payload[int(layer)] = compute_neutral_basis(
+            neutral_vectors,
+            max_components=max_components,
+            variance_cutoff=variance_cutoff,
+        )
+    return payload
+
+
 def project_out_basis(vector: torch.Tensor, basis: torch.Tensor | None) -> torch.Tensor:
     projected = vector.to(dtype=torch.float32)
     if basis is None or basis.numel() == 0:

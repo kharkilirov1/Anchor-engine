@@ -23,8 +23,8 @@ from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from src.utils.anchor_geometry import list_model_layers
 from src.utils.qwen_anchor_cartography import (
     SpanEncoding,
+    build_neutral_basis_by_layer,
     build_group_concept_vectors,
-    compute_neutral_basis,
     cosine_or_none,
     encode_focus_span,
     project_out_basis,
@@ -253,17 +253,13 @@ def main() -> None:
         missing = [name for name, value in neutral_encodings.items() if value is None]
         raise ValueError(f"neutral span matching failed for cases: {missing}")
 
-    neutral_basis_by_layer: dict[int, torch.Tensor | None] = {}
-    for layer in layers:
-        neutral_vectors = [
-            span_mean_hidden_for_layer(neutral_encodings[case.name], layer=int(layer))
-            for case in neutral_cases
-        ]
-        neutral_basis_by_layer[int(layer)] = compute_neutral_basis(
-            neutral_vectors,
-            max_components=int(args.neutral_components),
-            variance_cutoff=float(args.neutral_variance_cutoff),
-        )
+    neutral_basis_by_layer = build_neutral_basis_by_layer(
+        layers=layers,
+        case_names=[case.name for case in neutral_cases],
+        encodings=neutral_encodings,
+        max_components=int(args.neutral_components),
+        variance_cutoff=float(args.neutral_variance_cutoff),
+    )
 
     profile_payloads: list[dict[str, Any]] = []
     for profile_name in args.profiles:
