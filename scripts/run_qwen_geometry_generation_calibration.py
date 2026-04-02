@@ -677,7 +677,14 @@ def search_reference_and_thresholds(
                     mature_threshold=float(mature_threshold),
                     template_threshold=float(template_threshold),
                 )
-                calibration = build_calibration_summary(enriched_cases)
+                calibration = build_calibration_summary(
+                    enriched_cases,
+                    reference_layers=reference_layers,
+                    thresholds={
+                        "mature_r1_threshold": float(mature_threshold),
+                        "template_delta_threshold": float(template_threshold),
+                    },
+                )
                 policy_simulation = build_policy_simulation(enriched_cases)
                 score = score_cluster_configuration(
                     enriched_cases=enriched_cases,
