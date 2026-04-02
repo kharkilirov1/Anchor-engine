@@ -21,6 +21,12 @@ def test_make_qwen_anchor_geometry_cases_supports_length_profiles() -> None:
     assert len(short_cases[0].anchor_text.split()) < len(long_cases[0].anchor_text.split())
 
 
+def test_all_anchor_profiles_are_present_in_prompts() -> None:
+    for profile in list_anchor_span_profiles():
+        for case in make_qwen_anchor_geometry_cases(anchor_span_profile=profile):
+            assert case.anchor_text in case.prompt, (profile, case.name, case.anchor_text)
+
+
 def test_make_qwen_anchor_geometry_cases_rejects_unknown_profile() -> None:
     with pytest.raises(ValueError):
         make_qwen_anchor_geometry_cases(anchor_span_profile="giant")

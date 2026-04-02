@@ -47,7 +47,7 @@ ANCHOR_TEXT_BY_GROUP: dict[str, dict[str, str]] = {
         "long": "async FastAPI service architecture policy for internal APIs",
     },
     "json_only_response_format_policy": {
-        "short": "JSON response format policy",
+        "short": "JSON only response format",
         "medium": "JSON only response format policy",
         "long": "JSON only response format policy for every endpoint",
     },

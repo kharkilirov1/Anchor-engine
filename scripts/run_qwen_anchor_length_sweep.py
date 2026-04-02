@@ -126,6 +126,20 @@ def _fmt(value: Any) -> str:
         return str(value)
 
 
+def _validate_anchor_text_presence(profile_name: str, cases: list[Any]) -> None:
+    missing = [
+        case.name
+        for case in cases
+        if isinstance(case.prompt, str)
+        and isinstance(case.anchor_text, str)
+        and case.anchor_text not in case.prompt
+    ]
+    if missing:
+        raise ValueError(
+            f"profile {profile_name} has anchor_text not present in prompt for cases: {missing}"
+        )
+
+
 def build_length_sweep_markdown(
     *,
     model_name: str,
@@ -264,6 +278,7 @@ def main() -> None:
 
     for profile_name in args.profiles:
         cases = make_qwen_anchor_geometry_cases(anchor_span_profile=profile_name)
+        _validate_anchor_text_presence(profile_name, cases)
         if args.case_name:
             cases = [case for case in cases if case.name == args.case_name]
         if args.limit is not None:
@@ -294,6 +309,8 @@ def main() -> None:
             )
             if record is not None:
                 records.append(record)
+        if not records:
+            raise ValueError(f"all cases were skipped for profile {profile_name}")
         search_result = search_reference_and_thresholds(records, search_layers=search_layers)
         profile_payload = {
             "profile": profile_name,
