@@ -40,10 +40,16 @@ from src.model.anchor_tree_templates import get_expected_tree_template
 from src.model.anchor_tree_consistency import compute_graph_consistency, compute_tree_consistency
 from src.model.anchor_tree_proposals import rank_proposals_by_tree_repair
 from src.model.anchor_dependency_graph import build_anchor_dependency_graph
+from src.model.qwen_model_support import (
+    get_config_attr,
+    is_conditional_generation_config,
+)
 from src.utils.anchor_geometry import (
+    build_tail_reference_layers,
     compute_geometry_metrics,
     extract_delta_vectors,
     match_anchor_span,
+    select_tail_probe_layers,
 )
 from src.data.qwen_anchor_geometry_cases import QwenAnchorGeometryCase, make_qwen_anchor_geometry_cases
 
@@ -63,15 +69,19 @@ class QwenAnchorOverlay(nn.Module):
         if model_cfg is None:
             raise ValueError("base_model must expose a `.config` object")
 
-        hidden_size = int(getattr(model_cfg, "hidden_size"))
-        vocab_size = int(getattr(model_cfg, "vocab_size"))
+        hidden_size = int(get_config_attr(model_cfg, "hidden_size"))
+        vocab_size = int(get_config_attr(model_cfg, "vocab_size"))
         max_seq_len = int(
-            getattr(
+            get_config_attr(
                 model_cfg,
                 "max_position_embeddings",
-                getattr(model_cfg, "max_seq_len", 32768),
+                get_config_attr(model_cfg, "max_seq_len", 32768),
             )
         )
+        self.model_hidden_size = hidden_size
+        self.model_vocab_size = vocab_size
+        self.model_max_seq_len = max_seq_len
+        self.model_num_hidden_layers = int(get_config_attr(model_cfg, "num_hidden_layers", 0))
 
         anchor_cfg = replace(
             cfg or TOY_CONFIG,
@@ -167,25 +177,60 @@ class QwenAnchorOverlay(nn.Module):
     @classmethod
     def from_pretrained(
         cls,
-        model_name: str = "Qwen/Qwen2.5-1.5B",
+        model_name: str = "Qwen/Qwen3.5-4B",
         cfg: ModelConfig | None = None,
         device: str | torch.device | None = None,
         torch_dtype: torch.dtype | None = None,
         **kwargs: Any,
     ) -> "QwenAnchorOverlay":
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise ImportError(
                 "transformers is required for QwenAnchorOverlay.from_pretrained"
             ) from exc
 
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=torch_dtype,
-            **kwargs,
-        )
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        config_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key in {"cache_dir", "revision", "token", "subfolder", "trust_remote_code"}
+        }
+        tokenizer_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key in {"cache_dir", "revision", "token", "subfolder", "trust_remote_code", "use_fast"}
+        }
+        config = AutoConfig.from_pretrained(model_name, **config_kwargs)
+        if is_conditional_generation_config(config):
+            try:
+                from transformers import AutoModelForImageTextToText
+            except ImportError as exc:  # pragma: no cover - version-dependent path
+                raise ImportError(
+                    "This model requires a recent transformers build with AutoModelForImageTextToText. "
+                    "Install transformers from main in Colab/local env before loading Qwen3.5."
+                ) from exc
+            model = AutoModelForImageTextToText.from_pretrained(
+                model_name,
+                torch_dtype=torch_dtype,
+                **kwargs,
+            )
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch_dtype,
+                **kwargs,
+            )
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_name, **tokenizer_kwargs)
+        except Exception:
+            from transformers import AutoProcessor
+
+            processor = AutoProcessor.from_pretrained(model_name, **tokenizer_kwargs)
+            tokenizer = getattr(processor, "tokenizer", None)
+            if tokenizer is None:
+                raise
+        if getattr(tokenizer, "pad_token_id", None) is None and getattr(tokenizer, "eos_token_id", None) is not None:
+            tokenizer.pad_token = tokenizer.eos_token
         overlay = cls(base_model=model, cfg=cfg, tokenizer=tokenizer)
         if device is not None:
             overlay = overlay.to(device)
@@ -733,7 +778,7 @@ class QwenAnchorOverlay(nn.Module):
         output_projection = self._get_output_projection()
         bias_token_weights, forbidden_token_ids, bias_profile = build_bias_token_weights(
             tokenizer=self.tokenizer,
-            vocab_size=int(self.base_model.config.vocab_size),
+            vocab_size=int(self.model_vocab_size),
             device=device,
             prompt=prompt,
         )
@@ -1020,8 +1065,13 @@ class QwenAnchorOverlay(nn.Module):
                 return_dict=True,
             )
         hidden_states = outputs.hidden_states
+        probe_layers = select_tail_probe_layers(
+            num_hidden_layers=int(self.model_num_hidden_layers),
+            count=10,
+        )
+        reference_layers = build_tail_reference_layers(probe_layers)
         rank1_profile: dict[int, float | None] = {}
-        for layer in (24, 26, 27):
+        for layer in probe_layers:
             if layer + 1 >= len(hidden_states):
                 rank1_profile[layer] = None
                 continue
@@ -1033,14 +1083,17 @@ class QwenAnchorOverlay(nn.Module):
             metrics = compute_geometry_metrics(delta_vectors)
             rank1_value = metrics.get("rank1_explained_variance")
             rank1_profile[layer] = float(rank1_value) if rank1_value is not None else None
-        r1_at_24 = rank1_profile.get(24)
-        delta_l26_l27 = None
-        if rank1_profile.get(26) is not None and rank1_profile.get(27) is not None:
-            delta_l26_l27 = float(rank1_profile[27] - rank1_profile[26])
-        if r1_at_24 is not None and r1_at_24 > mature_r1_threshold:
+        mature_layer = int(reference_layers["mature_layer"])
+        template_prev_layer = int(reference_layers["template_prev_layer"])
+        template_curr_layer = int(reference_layers["template_curr_layer"])
+        r1_reference = rank1_profile.get(mature_layer)
+        delta_template_pair = None
+        if rank1_profile.get(template_prev_layer) is not None and rank1_profile.get(template_curr_layer) is not None:
+            delta_template_pair = float(rank1_profile[template_curr_layer] - rank1_profile[template_prev_layer])
+        if r1_reference is not None and r1_reference > mature_r1_threshold:
             cluster = "mature"
             route = "guided_lite"
-        elif delta_l26_l27 is not None and delta_l26_l27 > template_delta_threshold:
+        elif delta_template_pair is not None and delta_template_pair > template_delta_threshold:
             cluster = "template"
             route = "trust"
         else:
@@ -1053,8 +1106,10 @@ class QwenAnchorOverlay(nn.Module):
             "anchor_group": case.anchor_group,
             "anchor_text": case.anchor_text,
             "case_name": case.name,
-            "r1_at_24": r1_at_24,
-            "delta_l26_l27": delta_l26_l27,
+            "probe_layers": probe_layers,
+            "reference_layers": reference_layers,
+            "r1_reference": r1_reference,
+            "delta_template_pair": delta_template_pair,
             "mature_r1_threshold": float(mature_r1_threshold),
             "template_delta_threshold": float(template_delta_threshold),
         }
@@ -1087,7 +1142,7 @@ class QwenAnchorOverlay(nn.Module):
         generated_mask = attention_mask
         _, forbidden_token_ids, _ = build_bias_token_weights(
             tokenizer=self.tokenizer,
-            vocab_size=int(self.base_model.config.vocab_size),
+            vocab_size=int(self.model_vocab_size),
             device=device,
             prompt=prompt,
         )
@@ -1254,7 +1309,7 @@ class QwenAnchorOverlay(nn.Module):
         # Get forbidden token IDs for hard blocking only
         _, forbidden_token_ids, _ = build_bias_token_weights(
             tokenizer=self.tokenizer,
-            vocab_size=int(self.base_model.config.vocab_size),
+            vocab_size=int(self.model_vocab_size),
             device=device,
             prompt=prompt,
         )

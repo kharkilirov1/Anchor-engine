@@ -55,6 +55,38 @@ def list_model_layers(num_hidden_layers: int) -> list[int]:
     return list(range(int(num_hidden_layers)))
 
 
+def select_tail_probe_layers(
+    num_hidden_layers: int,
+    count: int = 10,
+) -> list[int]:
+    if num_hidden_layers <= 0:
+        raise ValueError("num_hidden_layers must be positive")
+    if count <= 0:
+        raise ValueError("count must be positive")
+    width = min(int(count), int(num_hidden_layers))
+    start = int(num_hidden_layers) - width
+    return list(range(start, int(num_hidden_layers)))
+
+
+def build_tail_reference_layers(
+    probe_layers: list[int],
+) -> dict[str, int]:
+    if not probe_layers:
+        raise ValueError("probe_layers must not be empty")
+    layers = sorted(int(layer) for layer in probe_layers)
+    mature_index = max(0, len(layers) - 4)
+    template_prev_index = max(0, len(layers) - 2)
+    template_curr_index = len(layers) - 1
+    mature_layer = layers[mature_index]
+    return {
+        "slope_start_layer": layers[0],
+        "slope_end_layer": mature_layer,
+        "mature_layer": mature_layer,
+        "template_prev_layer": layers[template_prev_index],
+        "template_curr_layer": layers[template_curr_index],
+    }
+
+
 def _normalize_text(text: str) -> str:
     return " ".join(text.lower().split())
 

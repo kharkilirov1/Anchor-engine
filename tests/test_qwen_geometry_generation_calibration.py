@@ -46,7 +46,7 @@ def test_build_calibration_summary_excludes_degenerate_bases() -> None:
             "constraint_delta": -1.0,
             "base_degenerate": True,
             "included_in_calibration": False,
-            "r1_at_24": 0.45,
+            "r1_reference": 0.45,
             "anchor_analysis": {"drift_detected": False},
         },
         {
@@ -55,7 +55,7 @@ def test_build_calibration_summary_excludes_degenerate_bases() -> None:
             "constraint_delta": 1.0,
             "base_degenerate": False,
             "included_in_calibration": True,
-            "r1_at_24": 0.52,
+            "r1_reference": 0.52,
             "anchor_analysis": {"drift_detected": False},
         },
         {
@@ -64,7 +64,7 @@ def test_build_calibration_summary_excludes_degenerate_bases() -> None:
             "constraint_delta": 0.0,
             "base_degenerate": False,
             "included_in_calibration": True,
-            "r1_at_24": 0.50,
+            "r1_reference": 0.50,
             "anchor_analysis": {"drift_detected": False},
         },
         {
@@ -73,7 +73,7 @@ def test_build_calibration_summary_excludes_degenerate_bases() -> None:
             "constraint_delta": 0.0,
             "base_degenerate": False,
             "included_in_calibration": True,
-            "r1_at_24": 0.70,
+            "r1_reference": 0.70,
             "anchor_analysis": {"drift_detected": False},
         },
     ]
@@ -88,6 +88,7 @@ def test_build_calibration_summary_excludes_degenerate_bases() -> None:
     assert flat["excluded_case_names"] == ["degenerate_flat"]
     assert flat_rescue["n_selected"] == 1
     assert flat_rescue["mean_constraint_delta"] == -1.0
+    assert flat["r1_reference_range"] == [0.45, 0.52]
     assert summary["threshold_candidates"]["clean_base_observed_separation"] is False
 
 

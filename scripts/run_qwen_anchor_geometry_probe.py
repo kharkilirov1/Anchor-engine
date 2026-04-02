@@ -938,6 +938,7 @@ def _tokenization_audit_rows(results: list[dict[str, Any]]) -> str:
 
 def build_markdown_report(
     *,
+    model_name: str,
     results: list[dict[str, Any]],
     aggregate: dict[str, Any],
     interpretation: dict[str, Any],
@@ -964,7 +965,7 @@ def build_markdown_report(
         "",
         "## Summary",
         "",
-        "- Model: `Qwen/Qwen2.5-1.5B`",
+        f"- Model: `{model_name}`",
         f"- Layer indices analyzed: `{layers[0]}..{layers[-1]}` ({len(layers)} total model layers; embedding state kept only for reference)",
         f"- Clean cases: `{tokenization['clean_case_count']}`",
         f"- Noisy cases: `{tokenization['noisy_case_count']}`",
@@ -1047,7 +1048,7 @@ def write_outputs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Qwen anchor geometry probe.")
-    parser.add_argument("--model-name", default="Qwen/Qwen2.5-1.5B")
+    parser.add_argument("--model-name", default="Qwen/Qwen3.5-4B")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--max-length", type=int, default=128)
     parser.add_argument(
@@ -1065,10 +1066,12 @@ def main() -> None:
         model_name=args.model_name,
         cfg=TOY_CONFIG,
         device=device,
+        torch_dtype=torch.float16 if "cuda" in str(device) else None,
+        low_cpu_mem_usage=True,
     )
     overlay.eval()
 
-    num_hidden_layers = int(getattr(overlay.base_model.config, "num_hidden_layers"))
+    num_hidden_layers = int(getattr(overlay, "model_num_hidden_layers", 0))
     layers = list_model_layers(num_hidden_layers)
     cases = make_qwen_anchor_geometry_cases()
     raw_results = [
@@ -1101,6 +1104,7 @@ def main() -> None:
         "interpretation": interpretation,
     }
     report_text = build_markdown_report(
+        model_name=args.model_name,
         results=raw_results,
         aggregate=aggregate,
         interpretation=interpretation,

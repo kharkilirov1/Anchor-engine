@@ -234,7 +234,7 @@ def build_markdown_report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sweep anchor thresholds on cached Qwen hidden states.")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-1.5B")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen3.5-4B")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--max_length", type=int, default=192)
     parser.add_argument("--seed", type=int, default=7)
@@ -266,6 +266,7 @@ def main() -> None:
         ),
         device=args.device,
         torch_dtype=torch.float16 if "cuda" in args.device else None,
+        low_cpu_mem_usage=True,
     )
     overlay.eval()
 

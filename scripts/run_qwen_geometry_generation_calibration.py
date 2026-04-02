@@ -20,8 +20,10 @@ if str(ROOT) not in sys.path:
 from src.model.config import TOY_CONFIG
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from src.utils.anchor_geometry import (
+    build_tail_reference_layers,
     compute_geometry_metrics,
     extract_delta_vectors,
+    select_tail_probe_layers,
     match_anchor_span,
     decode_token_pieces,
     decode_token_surfaces,
@@ -33,7 +35,7 @@ from src.data.qwen_anchor_geometry_cases import (
 )
 
 
-PROBE_LAYERS = [18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
+DEFAULT_PROBE_LAYER_COUNT = 10
 DEFAULT_CONFLICT_THRESHOLD = 0.55
 DEFAULT_BIAS_SCALE = 1.50
 DEFAULT_REPETITION_PENALTY = 1.15
@@ -46,6 +48,20 @@ DEFAULT_ENTROPY_SLOPE = 0.08
 DEFAULT_PRESSURE_THRESHOLD = 0.60
 DEFAULT_PRESSURE_SLOPE = 0.08
 DEFAULT_PRESSURE_RESCUE_FLOOR = 0.20
+
+
+def resolve_geometry_probe_spec(
+    overlay: QwenAnchorOverlay,
+) -> tuple[list[int], dict[str, int]]:
+    num_hidden_layers = int(getattr(overlay, "model_num_hidden_layers", 0))
+    if num_hidden_layers <= 0:
+        raise ValueError("model must expose a positive num_hidden_layers value")
+    probe_layers = select_tail_probe_layers(
+        num_hidden_layers=num_hidden_layers,
+        count=DEFAULT_PROBE_LAYER_COUNT,
+    )
+    reference_layers = build_tail_reference_layers(probe_layers)
+    return probe_layers, reference_layers
 
 KEYWORD_MAP: dict[str, dict[str, Any]] = {
     "strictly_vegan_meal_plan_policy": {
@@ -372,6 +388,8 @@ def compute_geometry_profile(
     case: QwenAnchorGeometryCase,
     max_length: int,
     device: torch.device,
+    probe_layers: list[int],
+    reference_layers: dict[str, int],
 ) -> dict[str, Any] | None:
     batch, offsets = encode_case(overlay=overlay, case=case, max_length=max_length, device=device)
     input_ids = [int(token) for token in batch["input_ids"][0].tolist()]
@@ -399,7 +417,7 @@ def compute_geometry_profile(
     rank1_profile: dict[str, float | None] = {}
     tortuosity_profile: dict[str, float | None] = {}
     layer_metrics: dict[str, dict[str, float | int | None]] = {}
-    for layer in PROBE_LAYERS:
+    for layer in probe_layers:
         delta_vectors = extract_delta_vectors(
             hidden_states[layer + 1][0],
             span_match.token_start,
@@ -410,27 +428,33 @@ def compute_geometry_profile(
         tortuosity_profile[str(layer)] = _to_scalar(metrics.get("path_tortuosity"))
         layer_metrics[str(layer)] = {key: _to_scalar(value) for key, value in metrics.items()}
 
-    r1_at_24 = rank1_profile.get("24")
-    r1_l26 = rank1_profile.get("26")
-    r1_l27 = rank1_profile.get("27")
-    delta_l26_l27 = None
-    if r1_l26 is not None and r1_l27 is not None:
-        delta_l26_l27 = float(r1_l27 - r1_l26)
+    mature_layer = int(reference_layers["mature_layer"])
+    template_prev_layer = int(reference_layers["template_prev_layer"])
+    template_curr_layer = int(reference_layers["template_curr_layer"])
+    slope_start_layer = int(reference_layers["slope_start_layer"])
+    slope_end_layer = int(reference_layers["slope_end_layer"])
 
-    slope_l18_l24 = None
+    r1_reference = rank1_profile.get(str(mature_layer))
+    r1_template_prev = rank1_profile.get(str(template_prev_layer))
+    r1_template_curr = rank1_profile.get(str(template_curr_layer))
+    delta_template_pair = None
+    if r1_template_prev is not None and r1_template_curr is not None:
+        delta_template_pair = float(r1_template_curr - r1_template_prev)
+
+    slope_tail_window = None
     slope_points = [
         (layer, rank1_profile[str(layer)])
-        for layer in range(18, 25)
+        for layer in range(slope_start_layer, slope_end_layer + 1)
         if rank1_profile.get(str(layer)) is not None
     ]
     if len(slope_points) >= 2:
         xs = np.array([point[0] for point in slope_points], dtype=np.float64)
         ys = np.array([float(point[1]) for point in slope_points], dtype=np.float64)
-        slope_l18_l24 = float(np.polyfit(xs, ys, deg=1)[0])
+        slope_tail_window = float(np.polyfit(xs, ys, deg=1)[0])
 
-    if r1_at_24 is not None and float(r1_at_24) > 0.65:
+    if r1_reference is not None and float(r1_reference) > 0.65:
         anchor_cluster = "mature"
-    elif delta_l26_l27 is not None and float(delta_l26_l27) > 0.08:
+    elif delta_template_pair is not None and float(delta_template_pair) > 0.08:
         anchor_cluster = "template"
     else:
         anchor_cluster = "flat"
@@ -444,9 +468,11 @@ def compute_geometry_profile(
         "rank1_profile": rank1_profile,
         "tortuosity_profile": tortuosity_profile,
         "layer_metrics": layer_metrics,
-        "r1_at_24": _to_scalar(r1_at_24),
-        "delta_l26_l27": _to_scalar(delta_l26_l27),
-        "slope_l18_l24": _to_scalar(slope_l18_l24),
+        "probe_layers": [int(layer) for layer in probe_layers],
+        "reference_layers": {key: int(value) for key, value in reference_layers.items()},
+        "r1_reference": _to_scalar(r1_reference),
+        "delta_template_pair": _to_scalar(delta_template_pair),
+        "slope_tail_window": _to_scalar(slope_tail_window),
         "anchor_cluster": anchor_cluster,
     }
 
@@ -455,6 +481,8 @@ def analyze_case(
     overlay: QwenAnchorOverlay,
     case: QwenAnchorGeometryCase,
     *,
+    probe_layers: list[int],
+    reference_layers: dict[str, int],
     max_length: int,
     max_new_tokens: int,
     conflict_threshold: float,
@@ -476,6 +504,8 @@ def analyze_case(
         case=case,
         max_length=max_length,
         device=device,
+        probe_layers=probe_layers,
+        reference_layers=reference_layers,
     )
     if geometry is None:
         print(f"SKIP {case.name}: span not matched")
@@ -551,9 +581,11 @@ def analyze_case(
         "first_token_has_leading_whitespace": geometry["first_token_has_leading_whitespace"],
         "rank1_profile": geometry["rank1_profile"],
         "tortuosity_profile": geometry["tortuosity_profile"],
-        "r1_at_24": geometry["r1_at_24"],
-        "delta_l26_l27": geometry["delta_l26_l27"],
-        "slope_l18_l24": geometry["slope_l18_l24"],
+        "probe_layers": geometry["probe_layers"],
+        "reference_layers": geometry["reference_layers"],
+        "r1_reference": geometry["r1_reference"],
+        "delta_template_pair": geometry["delta_template_pair"],
+        "slope_tail_window": geometry["slope_tail_window"],
         "anchor_cluster": geometry["anchor_cluster"],
         "base_continuation": base_continuation,
         "anchor_continuation": anchor_continuation,
@@ -580,7 +612,7 @@ def _cluster_summary(
         selected_cases = [case for case in cluster_cases if case.get("included_in_calibration", False)]
     deltas = [float(case["constraint_delta"]) for case in selected_cases if case["constraint_delta"] is not None]
     drifts = [1.0 if case["anchor_analysis"]["drift_detected"] else 0.0 for case in selected_cases]
-    r1_values = [float(case["r1_at_24"]) for case in cluster_cases if case["r1_at_24"] is not None]
+    r1_values = [float(case["r1_reference"]) for case in cluster_cases if case["r1_reference"] is not None]
     excluded_case_names = [case["name"] for case in cluster_cases if not case.get("included_in_calibration", False)]
     wins = sum(1 for delta in deltas if delta > 0)
     losses = sum(1 for delta in deltas if delta < 0)
@@ -603,7 +635,7 @@ def _cluster_summary(
         "mean_constraint_delta": float(sum(deltas) / len(deltas)) if deltas else None,
         "median_constraint_delta": median_constraint_delta,
         "mean_drift_rate": float(sum(drifts) / len(drifts)) if drifts else None,
-        "r1_at_24_range": [float(min(r1_values)), float(max(r1_values))] if r1_values else [None, None],
+        "r1_reference_range": [float(min(r1_values)), float(max(r1_values))] if r1_values else [None, None],
         "wins": wins,
         "losses": losses,
         "ties": ties,
@@ -613,6 +645,11 @@ def _cluster_summary(
 
 
 def build_calibration_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    reference_layers = (
+        dict(cases[0].get("reference_layers", {}))
+        if cases and isinstance(cases[0].get("reference_layers", {}), dict)
+        else {}
+    )
     by_cluster_all_cases = {
         cluster: _cluster_summary(cases, cluster, selector="all")
         for cluster in ("mature", "template", "flat")
@@ -641,9 +678,10 @@ def build_calibration_summary(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "by_cluster_all_cases": by_cluster_all_cases,
         "by_cluster_clean_base": by_cluster_clean_base,
         "by_cluster_degenerate_base": by_cluster_degenerate_base,
+        "reference_layers": reference_layers,
         "threshold_candidates": {
-            "r1_at_24_mature_threshold": 0.65,
-            "delta_l26_l27_template_threshold": 0.08,
+            "r1_reference_mature_threshold": 0.65,
+            "delta_template_pair_threshold": 0.08,
             "observed_separation": clean_base_observed_separation,
             "clean_base_observed_separation": clean_base_observed_separation,
         },
@@ -754,6 +792,23 @@ def build_markdown_report(
     calibration: dict[str, Any],
     policy_simulation: dict[str, Any],
 ) -> str:
+    reference_layers = dict(calibration.get("reference_layers", {}))
+    mature_layer = reference_layers.get("mature_layer")
+    template_prev_layer = reference_layers.get("template_prev_layer")
+    template_curr_layer = reference_layers.get("template_curr_layer")
+    slope_start_layer = reference_layers.get("slope_start_layer")
+    slope_end_layer = reference_layers.get("slope_end_layer")
+    r1_label = f"r1@L{mature_layer}" if mature_layer is not None else "r1@ref"
+    delta_label = (
+        f"delta_L{template_prev_layer}→L{template_curr_layer}"
+        if template_prev_layer is not None and template_curr_layer is not None
+        else "delta_template_pair"
+    )
+    slope_label = (
+        f"slope_L{slope_start_layer}-L{slope_end_layer}"
+        if slope_start_layer is not None and slope_end_layer is not None
+        else "slope_tail_window"
+    )
     cluster_counts = {
         cluster: sum(1 for case in cases if case["anchor_cluster"] == cluster)
         for cluster in ("mature", "template", "flat")
@@ -772,10 +827,11 @@ def build_markdown_report(
             f"- template: `{cluster_counts['template']}`",
             f"- flat: `{cluster_counts['flat']}`",
             f"- excluded_base_degenerate_cases: `{len(calibration['excluded_base_degenerate_case_names'])}`",
+            f"- reference_layers: `{reference_layers}`",
         "",
         "## Per-case table",
         "",
-        "| name | cluster | r1@L24 | delta_L26→L27 | slope_L18-L24 | base_constraint | anchor_constraint | constraint_delta | base_degenerate | drift_detected |",
+        f"| name | cluster | {r1_label} | {delta_label} | {slope_label} | base_constraint | anchor_constraint | constraint_delta | base_degenerate | drift_detected |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for case in cases:
@@ -785,9 +841,9 @@ def build_markdown_report(
                 [
                     case["name"],
                     case["anchor_cluster"],
-                    _fmt(case["r1_at_24"]),
-                    _fmt(case["delta_l26_l27"]),
-                    _fmt(case["slope_l18_l24"]),
+                    _fmt(case["r1_reference"]),
+                    _fmt(case["delta_template_pair"]),
+                    _fmt(case["slope_tail_window"]),
                     _fmt(case["base_analysis"]["constraint_score"]),
                     _fmt(case["anchor_analysis"]["constraint_score"]),
                     _fmt(case["constraint_delta"]),
@@ -802,7 +858,7 @@ def build_markdown_report(
             "",
             "## Calibration summary",
             "",
-            "| cluster | n_total | n_selected | mean_constraint_delta | median_constraint_delta | mean_drift_rate | rescue_rate | wins | losses | ties | r1_at_24_range |",
+            f"| cluster | n_total | n_selected | mean_constraint_delta | median_constraint_delta | mean_drift_rate | rescue_rate | wins | losses | ties | {r1_label}_range |",
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
         ]
     )
@@ -821,7 +877,7 @@ def build_markdown_report(
                     str(summary["wins"]),
                     str(summary["losses"]),
                     str(summary["ties"]),
-                    f"[{_fmt(summary['r1_at_24_range'][0])}, {_fmt(summary['r1_at_24_range'][1])}]",
+                    f"[{_fmt(summary['r1_reference_range'][0])}, {_fmt(summary['r1_reference_range'][1])}]",
                 ]
             )
             + " |"
@@ -895,7 +951,7 @@ def build_markdown_report(
             "",
             "## Conclusion",
             "",
-            f"Current data {'support' if calibration['threshold_candidates']['clean_base_observed_separation'] else 'do not support'} the thresholds `0.65 / 0.08` as a clean routing split on non-degenerate-base cases; degenerate-base rescue cases are reported separately.",
+            f"Current data {'support' if calibration['threshold_candidates']['clean_base_observed_separation'] else 'do not support'} the thresholds `{r1_label} > 0.65` and `{delta_label} > 0.08` as a clean routing split on non-degenerate-base cases; degenerate-base rescue cases are reported separately.",
             "",
         ]
     )
@@ -917,7 +973,7 @@ def write_outputs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run geometry + generation calibration for Qwen anchors.")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-1.5B")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen3.5-4B")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--max_length", type=int, default=128)
     parser.add_argument("--max_new_tokens", type=int, default=120)
@@ -956,6 +1012,7 @@ def main() -> None:
     )
     overlay.eval()
     device = torch.device(args.device)
+    probe_layers, reference_layers = resolve_geometry_probe_spec(overlay)
 
     cases = make_qwen_anchor_geometry_cases()
     if args.case_name:
@@ -975,6 +1032,8 @@ def main() -> None:
         record = analyze_case(
             overlay=overlay,
             case=case,
+            probe_layers=probe_layers,
+            reference_layers=reference_layers,
             max_length=args.max_length,
             max_new_tokens=args.max_new_tokens,
             conflict_threshold=DEFAULT_CONFLICT_THRESHOLD,
@@ -1002,7 +1061,8 @@ def main() -> None:
                     "device": args.device,
                     "max_length": args.max_length,
                     "max_new_tokens": args.max_new_tokens,
-                    "probe_layers": PROBE_LAYERS,
+                    "probe_layers": probe_layers,
+                    "reference_layers": reference_layers,
                     "seed": args.seed,
                 },
                 "cases": records,
@@ -1032,7 +1092,8 @@ def main() -> None:
             "device": args.device,
             "max_length": args.max_length,
             "max_new_tokens": args.max_new_tokens,
-            "probe_layers": PROBE_LAYERS,
+            "probe_layers": probe_layers,
+            "reference_layers": reference_layers,
             "seed": args.seed,
         },
         "cases": records,
