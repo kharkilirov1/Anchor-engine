@@ -294,12 +294,19 @@ Respond with ONLY valid JSON, no markdown, no explanation:
 
     # Парсим JSON из ответа
     try:
-        # Убираем возможные markdown блоки
+        # Убираем возможные markdown блоки и комментарии
         raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
+        # Убираем строки-комментарии (#) перед JSON
+        lines = [l for l in raw.splitlines() if not l.strip().startswith("#")]
+        raw = "\n".join(lines).strip()
+        # Если ответ не начинается с { — модель ответила не JSON, логируем
+        if not raw.startswith("{"):
+            print(f"[Strategist/LLM] Не JSON ответ: {raw[:100]!r}")
+            return None
         proposal = json.loads(raw.strip())
         print(f"[Strategist/LLM] Предложение: {proposal.get('id')} — {proposal.get('description', '')[:60]}")
         print(f"[Strategist/LLM] Обоснование: {proposal.get('reasoning', '')[:120]}")
