@@ -20,6 +20,8 @@ env/
 *.npy
 checkpoints/
 archive/
+!archive/qwen35_4b_anchor_concept_direction_map.json
+!archive/qwen35_4b_anchor_carryover_probe.json
 /data/
 results/*.json
 results/*.csv
@@ -35,3 +37,7 @@ tmp_test_cache/
 tmp_test_cache_bpe/
 tmp_test_cache_bpe2/
 tmp_test_cache_tiny/
+
+# Baseline geometry data for visualizer (not experiment results)
+!archive/qwen35_4b_anchor_concept_direction_map.json
+!archive/qwen35_4b_anchor_carryover_probe.json
