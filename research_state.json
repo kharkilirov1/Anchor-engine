@@ -1,0 +1,147 @@
+{
+  "version": "1.0",
+  "project": "ABPT — Anchor-Based Probing Tool",
+  "model": "Qwen/Qwen3.5-4B",
+  "created_at": "2026-04-03",
+  "last_updated": "2026-04-03",
+
+  "current_phase": 1,
+  "budget_remaining": 10,
+  "experiments_run": 0,
+  "experiments_max": 50,
+
+  "metric_primary": "spearman_rho_early_slope_vs_constraint",
+  "metric_secondary": "constraint_rescue_rate",
+  "metric_history": [],
+
+  "phases": {
+    "1": {
+      "name": "Geometry Verification",
+      "goal": "Confirm that early_slope_4_8 predicts base_constraint_score",
+      "status": "pending",
+      "success_criterion": "|rho| > 0.4 for early_slope_4_8 vs base_constraint_score",
+      "experiments": []
+    },
+    "2": {
+      "name": "Group-Specific Routing",
+      "goal": "Replace universal threshold with group-aware carryover layer routing",
+      "status": "blocked_on_phase_1",
+      "success_criterion": "routing_delta > 0.077 (beat flat_failure_gated baseline)",
+      "experiments": []
+    },
+    "3": {
+      "name": "Injection Detection",
+      "goal": "Detect prompt injections via geometric anomaly in anchor span",
+      "status": "blocked_on_phase_1",
+      "success_criterion": "injection_auc > 0.7 (ROC AUC on injection vs clean cases)",
+      "experiments": []
+    },
+    "4": {
+      "name": "New Hallucination Cases",
+      "goal": "Expand case set with real hallucination examples",
+      "status": "pending",
+      "success_criterion": "n_flat_rescue_cases >= 5 (currently 1)",
+      "experiments": []
+    },
+    "5": {
+      "name": "TTT Probe",
+      "goal": "Online probe with conformal calibration (ORCA-style)",
+      "status": "future",
+      "success_criterion": "online_rescue_rate > flat_failure_gated baseline",
+      "experiments": []
+    },
+    "6": {
+      "name": "Auto-Discovery",
+      "goal": "Automatic crystallization zone detection for any model",
+      "status": "future",
+      "success_criterion": "correct zone detected on 3+ unseen models",
+      "experiments": []
+    }
+  },
+
+  "known_facts": {
+    "crystallization_zone": [4, 8],
+    "model_n_layers": 32,
+    "carryover_layers": {
+      "json_only_response_format_policy": 11,
+      "proof_by_contradiction_reasoning_steps": 25,
+      "dependency_injection_request_flow_sequence": 24,
+      "binary_search_update_loop_procedure": 10,
+      "strictly_vegan_meal_plan_policy": 11,
+      "async_fastapi_service_architecture_policy": null
+    },
+    "optimal_anchor_profile": "medium",
+    "best_policy_so_far": "flat_failure_gated",
+    "best_delta_so_far": 0.077,
+    "n_cases_current": 13,
+    "n_flat_rescue_cases": 1
+  },
+
+  "open_hypotheses": [
+    {
+      "id": "H1",
+      "statement": "early_slope_4_8 negatively correlates with base_constraint_score",
+      "phase": 1,
+      "script": "run_qwen_phase_probe.py",
+      "status": "untested"
+    },
+    {
+      "id": "H2",
+      "statement": "group-specific carryover routing outperforms universal threshold",
+      "phase": 2,
+      "script": "run_qwen_group_routing_probe.py",
+      "status": "untested",
+      "depends_on": "H1"
+    },
+    {
+      "id": "H3",
+      "statement": "injection anchor has different carryover layer than legitimate anchor of same group",
+      "phase": 3,
+      "script": "run_qwen_injection_geometry_probe.py",
+      "status": "untested"
+    },
+    {
+      "id": "H4",
+      "statement": "attention mass from suffix to anchor span peaks at L4-L8 (attention beacon)",
+      "phase": 1,
+      "script": "run_qwen_attention_corroboration_probe.py",
+      "status": "untested"
+    },
+    {
+      "id": "H5",
+      "statement": "contradiction_proof failure caused by template cluster geometry suppressing constraint",
+      "phase": 1,
+      "script": "run_qwen_phase_probe.py",
+      "status": "untested"
+    }
+  ],
+
+  "disproven_hypotheses": [
+    {
+      "id": "DH1",
+      "statement": "single universal reference layer is stable across prompt variations",
+      "evidence": "mature_layer shifted L21→L28 between runs; anchor sweep: 0 wins all profiles"
+    },
+    {
+      "id": "DH2",
+      "statement": "longer anchor spans produce stronger signal",
+      "evidence": "concept norm: short=68, medium=64, long=58; signal degrades with length"
+    }
+  ],
+
+  "next_experiment": {
+    "id": "EXP-001",
+    "phase": 1,
+    "hypothesis": "H1",
+    "script": "run_qwen_phase_probe.py",
+    "args": {
+      "model": "Qwen/Qwen3.5-4B",
+      "anchor_profile": "medium",
+      "tau": 0.5
+    },
+    "expected_output": "archive/qwen35_4b_phase_probe_medium.json",
+    "success_metric": "correlation_summary.spearman_early_slope_4_8_vs_base_constraint",
+    "success_threshold": 0.4,
+    "status": "ready"
+  }
+}
