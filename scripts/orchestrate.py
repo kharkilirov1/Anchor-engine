@@ -149,7 +149,7 @@ def strategist_select_next(state: dict[str, Any], target_phase: int | None = Non
         exp["hypothesis_id"]
         for phase_data in state["phases"].values()
         for exp in phase_data.get("experiments", [])
-        if exp.get("status") in ("success", "failed", "done")
+        if exp.get("status") in ("success", "failed", "done", "skipped")
     }
 
     phase_filter = target_phase or state["current_phase"]
