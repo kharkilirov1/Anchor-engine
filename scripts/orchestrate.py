@@ -239,6 +239,25 @@ Reply with just the hypothesis ID (e.g. "H1"). No explanation."""
             if choice in EXPERIMENT_REGISTRY:
                 print(f"[Strategist/GPT] Выбор: {choice}")
                 return choice
+
+        # Fallback на DeepSeek (OpenAI-compatible)
+        deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
+        if deepseek_key:
+            import openai
+            client = openai.OpenAI(
+                api_key=deepseek_key,
+                base_url="https://api.deepseek.com/v1",
+            )
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=10,
+                temperature=0.0,
+            )
+            choice = response.choices[0].message.content.strip()
+            if choice in EXPERIMENT_REGISTRY:
+                print(f"[Strategist/DeepSeek] Выбор: {choice}")
+                return choice
     except Exception as e:
         print(f"[Strategist/LLM] Ошибка: {e} → fallback на rule-based")
 
