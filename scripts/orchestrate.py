@@ -175,89 +175,138 @@ def strategist_select_next(state: dict[str, Any], target_phase: int | None = Non
     return None
 
 
-def strategist_llm_select(state: dict[str, Any], playbook: str) -> str | None:
+def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any] | None:
     """
-    LLM-assisted Strategist (если есть API ключ).
-    Использует OpenAI или Anthropic для выбора следующего эксперимента.
+    Free-form LLM Strategist.
+    Предлагает следующий эксперимент в виде JSON — может придумать новую гипотезу.
+    Возвращает dict с полями: id, description, script, args, result_key, success_threshold
     """
-    openai_key = os.environ.get("OPENAI_API_KEY")
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not openai_key and not anthropic_key:
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if not deepseek_key and not anthropic_key and not openai_key:
         return None
 
-    completed = {
-        exp["hypothesis_id"]
+    # Список доступных скриптов
+    scripts_dir = Path(__file__).resolve().parent
+    available_scripts = [p.name for p in scripts_dir.glob("run_qwen_*.py")]
+
+    completed = [
+        {"id": exp["hypothesis_id"], "status": exp["status"],
+         "metric": exp.get("metric_value")}
         for phase_data in state["phases"].values()
         for exp in phase_data.get("experiments", [])
-        if exp.get("status") in ("success", "failed", "done")
-    }
-    available = [h for h in EXPERIMENT_REGISTRY if h not in completed]
+    ]
 
-    prompt = f"""You are the Strategist for ABPT (Anchor-Based Probing Tool) research.
+    prompt = f"""You are the Strategist for ABPT — Anchor-Based Probing Tool research on Qwen3.5-4B.
 
-Current state:
-- Phase: {state['current_phase']}
-- Budget remaining: {state['budget_remaining']} experiments
-- Completed: {list(completed)}
-- Available: {available}
+## Research context
+Goal: understand how anchor spans in the prompt affect hidden state geometry and generation quality.
 
-Playbook excerpt:
-{playbook[-2000:]}
+Key findings so far:
+- Crystallization zone: L4-L8 (r1 rises here, but slowly — NOT a sharp peak)
+- early_slope_4_8 does NOT predict constraint_score (rho=-0.14 medium, -0.27 short)
+- tail_retention_ratio DOES predict constraint_score (rho=+0.642 medium profile)
+  = auc(L9-L23) / auc(L4-L8) — how much signal survives after crystallization zone
+- group-specific carryover layers: json=L11, contradiction=L25, DI=L24, binary=L10, vegan=L11
+- anchor mechanism = attention beacon hypothesis (not residual rewrite)
 
-Metric history:
-{json.dumps(state.get('metric_history', [])[-5:], indent=2)}
+## Completed experiments
+{json.dumps(completed, indent=2)}
 
-Choose the SINGLE best next experiment from {available}.
-Reply with just the hypothesis ID (e.g. "H1"). No explanation."""
+## Available scripts
+{available_scripts}
 
-    try:
-        # Anthropic (приоритет если есть ключ)
-        if anthropic_key:
-            import anthropic
-            client = anthropic.Anthropic(api_key=anthropic_key)
-            response = client.messages.create(
-                model="claude-sonnet-4-5",
-                max_tokens=10,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            choice = response.content[0].text.strip()
-            if choice in EXPERIMENT_REGISTRY:
-                print(f"[Strategist/Claude] Выбор: {choice}")
-                return choice
+## Budget remaining
+{state['budget_remaining']} experiments
 
-        # Fallback на OpenAI
-        if openai_key:
-            import openai
-            client = openai.OpenAI(api_key=openai_key)
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=10,
-                temperature=0.0,
-            )
-            choice = response.choices[0].message.content.strip()
-            if choice in EXPERIMENT_REGISTRY:
-                print(f"[Strategist/GPT] Выбор: {choice}")
-                return choice
+## Playbook (last 3000 chars)
+{playbook[-3000:]}
 
-        # Fallback на DeepSeek (OpenAI-compatible)
-        deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
+## Your task
+Propose the SINGLE most valuable next experiment. You are FREE to:
+- Design a new hypothesis not in the original list
+- Use any available script with any valid arguments
+- Focus on what would most advance understanding
+
+Respond with ONLY valid JSON, no markdown, no explanation:
+{{
+  "id": "unique_hypothesis_id",
+  "description": "one sentence what this tests",
+  "script": "script_filename.py",
+  "args": {{"anchor_profile": "medium"}},
+  "result_key": "correlation_summary.some_metric",
+  "success_threshold": 0.4,
+  "reasoning": "why this experiment now"
+}}"""
+
+    def _call_llm(prompt: str) -> str | None:
+        # DeepSeek (приоритет — самый дешёвый)
         if deepseek_key:
-            import openai
-            client = openai.OpenAI(
-                api_key=deepseek_key,
-                base_url="https://api.deepseek.com/v1",
-            )
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=10,
-                temperature=0.0,
-            )
-            choice = response.choices[0].message.content.strip()
-            if choice in EXPERIMENT_REGISTRY:
-                print(f"[Strategist/DeepSeek] Выбор: {choice}")
-                return choice
+            try:
+                import openai as _openai
+                client = _openai.OpenAI(api_key=deepseek_key,
+                                        base_url="https://api.deepseek.com/v1")
+                resp = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=400,
+                    temperature=0.3,
+                )
+                return resp.choices[0].message.content.strip()
+            except Exception as e:
+                print(f"[Strategist/DeepSeek] error: {e}")
+
+        # Anthropic
+        if anthropic_key:
+            try:
+                import anthropic as _anthropic
+                client = _anthropic.Anthropic(api_key=anthropic_key)
+                resp = client.messages.create(
+                    model="claude-sonnet-4-5",
+                    max_tokens=400,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return resp.content[0].text.strip()
+            except Exception as e:
+                print(f"[Strategist/Claude] error: {e}")
+
+        # OpenAI
+        if openai_key:
+            try:
+                import openai as _openai
+                client = _openai.OpenAI(api_key=openai_key)
+                resp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=400,
+                    temperature=0.3,
+                )
+                return resp.choices[0].message.content.strip()
+            except Exception as e:
+                print(f"[Strategist/GPT] error: {e}")
+
+        return None
+
+    raw = _call_llm(prompt)
+    if not raw:
+        return None
+
+    # Парсим JSON из ответа
+    try:
+        # Убираем возможные markdown блоки
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        proposal = json.loads(raw.strip())
+        print(f"[Strategist/LLM] Предложение: {proposal.get('id')} — {proposal.get('description', '')[:60]}")
+        print(f"[Strategist/LLM] Обоснование: {proposal.get('reasoning', '')[:120]}")
+        return proposal
+    except (json.JSONDecodeError, KeyError) as e:
+        print(f"[Strategist/LLM] Ошибка парсинга: {e}\nRaw: {raw[:200]}")
+        return None
     except Exception as e:
         print(f"[Strategist/LLM] Ошибка: {e} → fallback на rule-based")
 
@@ -548,11 +597,27 @@ def run_loop(
         print(f"\n[Loop {iteration}] Strategist выбирает следующий эксперимент...")
 
         # Выбор следующего эксперимента
+        llm_proposal: dict[str, Any] | None = None
         if target_hypothesis:
             hyp_id = target_hypothesis
-            target_hypothesis = None  # Только первый раз
+            target_hypothesis = None
         elif use_llm_strategist:
-            hyp_id = strategist_llm_select(state, playbook) or strategist_select_next(state, target_phase)
+            llm_proposal = strategist_llm_select(state, playbook)
+            if llm_proposal:
+                hyp_id = llm_proposal["id"]
+                # Регистрируем динамически в EXPERIMENT_REGISTRY
+                EXPERIMENT_REGISTRY[hyp_id] = {
+                    "description": llm_proposal.get("description", hyp_id),
+                    "phase": state["current_phase"],
+                    "script": llm_proposal.get("script", "run_qwen_phase_probe.py"),
+                    "default_args": llm_proposal.get("args", {}),
+                    "output_pattern": "archive/*.json",
+                    "result_key": llm_proposal.get("result_key"),
+                    "success_threshold": llm_proposal.get("success_threshold"),
+                    "depends_on": [],
+                }
+            else:
+                hyp_id = strategist_select_next(state, target_phase)
         else:
             hyp_id = strategist_select_next(state, target_phase)
 
@@ -561,10 +626,14 @@ def run_loop(
             break
 
         hyp_def = EXPERIMENT_REGISTRY[hyp_id]
-        print(f"[Strategist] → {hyp_id}: {hyp_def['description']}")
+        source = "LLM" if llm_proposal else "rule-based"
+        print(f"[Strategist/{source}] → {hyp_id}: {hyp_def['description']}")
+        if llm_proposal and llm_proposal.get("reasoning"):
+            print(f"[Strategist/reasoning] {llm_proposal['reasoning'][:150]}")
         print_status(state)
 
-        log_event({"event": "experiment_start", "hypothesis": hyp_id})
+        log_event({"event": "experiment_start", "hypothesis": hyp_id,
+                   "llm_proposal": llm_proposal})
 
         # Worker запускает скрипт
         print(f"\n[Worker] Запускаю {hyp_def['script']}...")
