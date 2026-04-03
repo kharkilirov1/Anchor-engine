@@ -579,7 +579,7 @@ def main() -> None:
     parser.add_argument("--tau", type=float, default=DEFAULT_TAU,
                         help="Порог r1 для подсчёта profile_width_above_tau")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()  # ignore unknown args from LLM Strategist
 
     run(
         model_name=args.model,
