@@ -180,23 +180,20 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> str | None:
     LLM-assisted Strategist (если есть API ключ).
     Использует OpenAI или Anthropic для выбора следующего эксперимента.
     """
-    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not openai_key and not anthropic_key:
         return None
 
-    try:
-        import openai
-        client = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    completed = {
+        exp["hypothesis_id"]
+        for phase_data in state["phases"].values()
+        for exp in phase_data.get("experiments", [])
+        if exp.get("status") in ("success", "failed", "done")
+    }
+    available = [h for h in EXPERIMENT_REGISTRY if h not in completed]
 
-        completed = {
-            exp["hypothesis_id"]
-            for phase_data in state["phases"].values()
-            for exp in phase_data.get("experiments", [])
-            if exp.get("status") in ("success", "failed", "done")
-        }
-        available = [h for h in EXPERIMENT_REGISTRY if h not in completed]
-
-        prompt = f"""You are the Strategist for ABPT research.
+    prompt = f"""You are the Strategist for ABPT (Anchor-Based Probing Tool) research.
 
 Current state:
 - Phase: {state['current_phase']}
@@ -213,16 +210,35 @@ Metric history:
 Choose the SINGLE best next experiment from {available}.
 Reply with just the hypothesis ID (e.g. "H1"). No explanation."""
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
-            temperature=0.0,
-        )
-        choice = response.choices[0].message.content.strip()
-        if choice in EXPERIMENT_REGISTRY:
-            print(f"[Strategist/LLM] Выбор: {choice}")
-            return choice
+    try:
+        # Anthropic (приоритет если есть ключ)
+        if anthropic_key:
+            import anthropic
+            client = anthropic.Anthropic(api_key=anthropic_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=10,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            choice = response.content[0].text.strip()
+            if choice in EXPERIMENT_REGISTRY:
+                print(f"[Strategist/Claude] Выбор: {choice}")
+                return choice
+
+        # Fallback на OpenAI
+        if openai_key:
+            import openai
+            client = openai.OpenAI(api_key=openai_key)
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=10,
+                temperature=0.0,
+            )
+            choice = response.choices[0].message.content.strip()
+            if choice in EXPERIMENT_REGISTRY:
+                print(f"[Strategist/GPT] Выбор: {choice}")
+                return choice
     except Exception as e:
         print(f"[Strategist/LLM] Ошибка: {e} → fallback на rule-based")
 
