@@ -184,7 +184,10 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
     deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
+    print(f"[Strategist/LLM] Keys: DeepSeek={'yes' if deepseek_key else 'no'}, "
+          f"Anthropic={'yes' if anthropic_key else 'no'}, OpenAI={'yes' if openai_key else 'no'}")
     if not deepseek_key and not anthropic_key and not openai_key:
+        print("[Strategist/LLM] No API keys found → skipping LLM strategist")
         return None
 
     # Список доступных скриптов
@@ -254,6 +257,7 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
         if deepseek_key:
             try:
                 import openai as _openai
+                print("[Strategist/DeepSeek] Calling API...")
                 client = _openai.OpenAI(api_key=deepseek_key,
                                         base_url="https://api.deepseek.com/v1")
                 resp = client.chat.completions.create(
@@ -262,7 +266,9 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
                     max_tokens=2000,
                     temperature=0.3,
                 )
-                return resp.choices[0].message.content.strip()
+                content = resp.choices[0].message.content.strip()
+                print(f"[Strategist/DeepSeek] Got response ({len(content)} chars)")
+                return content
             except Exception as e:
                 print(f"[Strategist/DeepSeek] error: {e}")
 
@@ -314,7 +320,7 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
         raw = "\n".join(lines).strip()
         # Если ответ не начинается с { — модель ответила не JSON, логируем
         if not raw.startswith("{"):
-            print(f"[Strategist/LLM] Не JSON ответ: {raw[:100]!r}")
+            print(f"[Strategist/LLM] Не JSON ответ: {raw[:200]!r}")
             return None
         proposal = json.loads(raw.strip())
         print(f"[Strategist/LLM] Предложение: {proposal.get('id')} — {proposal.get('description', '')[:60]}")
@@ -641,6 +647,7 @@ def run_loop(
                     "depends_on": [],
                 }
             else:
+                print("[Strategist/LLM] LLM не вернул валидный JSON → fallback на rule-based")
                 hyp_id = strategist_select_next(state, target_phase)
         else:
             hyp_id = strategist_select_next(state, target_phase)
