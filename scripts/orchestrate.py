@@ -237,20 +237,73 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
 ## Budget remaining
 {state['budget_remaining']} experiments
 
+## Script template (use this if writing a new script)
+```python
+from __future__ import annotations
+import argparse, json, sys
+from pathlib import Path
+import torch
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.data.qwen_anchor_geometry_cases import make_qwen_anchor_geometry_cases, list_anchor_span_profiles
+from src.model.config import TOY_CONFIG
+from src.model.qwen_anchor_overlay import QwenAnchorOverlay
+from src.utils.qwen_anchor_cartography import (
+    build_neutral_basis_by_layer, build_group_concept_vectors,
+    cosine_or_none, encode_focus_span, project_out_basis, span_mean_hidden_for_layer, SpanEncoding,
+)
+from src.utils.anchor_geometry import list_model_layers
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="Qwen/Qwen3.5-4B")
+    parser.add_argument("--anchor-profile", default="medium")
+    parser.add_argument("--output", default=str(ROOT / "archive" / "my_probe.json"))
+    args, _ = parser.parse_known_args()  # ignore unknown args
+
+    config = TOY_CONFIG
+    overlay = QwenAnchorOverlay(args.model, config=config)
+    overlay.load()
+    layers = list_model_layers(overlay)
+    cases = make_qwen_anchor_geometry_cases(anchor_profile=args.anchor_profile)
+    neutral_cases = cases  # or make_qwen_anchor_neutral_cases()
+
+    results = []
+    for case in cases:
+        enc: SpanEncoding = encode_focus_span(overlay, case)
+        # enc.hidden_states[layer+1][0] -> tensor [seq_len, hidden_dim]
+        # enc.span_match.token_start/end -> anchor token positions
+        result = {{"name": case.name, "group": case.group}}
+        # ... your analysis here ...
+        results.append(result)
+
+    output = {{"metadata": {{"model": args.model, "profile": args.anchor_profile}}, "results": results}}
+    Path(args.output).parent.mkdir(exist_ok=True)
+    json.dump(output, open(args.output, "w"), indent=2)
+    print(f"Saved: {{args.output}}")
+
+if __name__ == "__main__":
+    main()
+```
+
 ## Your task
 Propose ONE new experiment targeting an OPEN QUESTION above.
 Do NOT repeat phase_probe if it is in blocked scripts.
-Focus on scripts NOT yet used or used fewer than 3 times.
+You MAY write a completely new script if no existing script fits.
 
 Respond with ONLY valid JSON, no markdown, no explanation:
 {{
   "id": "unique_hypothesis_id",
   "description": "one sentence what this tests",
-  "script": "script_filename.py",
+  "script": "run_qwen_llm_<id>.py",
   "args": {{"anchor_profile": "medium"}},
-  "result_key": "correlation_summary.some_metric",
+  "result_key": "results.0.some_metric",
   "success_threshold": 0.4,
-  "reasoning": "why this experiment now"
+  "reasoning": "why this experiment now",
+  "script_code": "# OPTIONAL: full Python script code if writing new script; omit if using existing"
 }}"""
 
     def _call_llm(prompt: str) -> str | None:
@@ -263,7 +316,7 @@ Respond with ONLY valid JSON, no markdown, no explanation:
                 resp = client.chat.completions.create(
                     model="deepseek-chat",
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=400,
+                    max_tokens=2000,
                     temperature=0.3,
                 )
                 return resp.choices[0].message.content.strip()
@@ -277,7 +330,7 @@ Respond with ONLY valid JSON, no markdown, no explanation:
                 client = _anthropic.Anthropic(api_key=anthropic_key)
                 resp = client.messages.create(
                     model="claude-sonnet-4-5",
-                    max_tokens=400,
+                    max_tokens=2000,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return resp.content[0].text.strip()
@@ -292,7 +345,7 @@ Respond with ONLY valid JSON, no markdown, no explanation:
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=400,
+                    max_tokens=2000,
                     temperature=0.3,
                 )
                 return resp.choices[0].message.content.strip()
@@ -626,10 +679,18 @@ def run_loop(
             if llm_proposal:
                 hyp_id = llm_proposal["id"]
                 # Регистрируем динамически в EXPERIMENT_REGISTRY
+                script_name = llm_proposal.get("script", f"run_qwen_llm_{hyp_id}.py")
+                # Если DeepSeek написал код — сохраняем скрипт
+                script_code = llm_proposal.get("script_code", "")
+                if script_code and script_code.strip():
+                    script_path = SCRIPTS_DIR / script_name
+                    script_path.write_text(script_code)
+                    print(f"[Strategist/LLM] Написан новый скрипт: {script_name} ({len(script_code)} chars)")
+
                 EXPERIMENT_REGISTRY[hyp_id] = {
                     "description": llm_proposal.get("description", hyp_id),
                     "phase": state["current_phase"],
-                    "script": llm_proposal.get("script", "run_qwen_phase_probe.py"),
+                    "script": script_name,
                     "default_args": llm_proposal.get("args", {}),
                     "output_pattern": "archive/*.json",
                     "result_key": llm_proposal.get("result_key"),
