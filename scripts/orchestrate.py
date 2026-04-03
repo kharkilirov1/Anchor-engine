@@ -207,104 +207,47 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
 
     overused = [s for s, count in script_usage.items() if count >= 3]
 
-    prompt = f"""You are the Strategist for ABPT — Anchor-Based Probing Tool research on Qwen3.5-4B.
+    _blocked = str(overused) if overused else "none"
+    _completed_json = json.dumps(completed[-5:], indent=2)
+    _scripts = str(available_scripts)
+    _budget = str(state['budget_remaining'])
+    _playbook_tail = playbook[-1500:]
 
-## CONFIRMED FINDINGS (do NOT re-test these)
-- tail_retention_ratio predicts constraint_score with rho=+0.642 (CONFIRMED, strong signal)
-- early_slope_4_8 does NOT predict (rho=-0.14, CONFIRMED NEGATIVE)
-- Crystallization zone: L4-L8
-- Group carryover layers: json=L11, contradiction=L25, DI=L24, binary=L10, vegan=L11
-
-## BLOCKED SCRIPTS (used 3+ times, do NOT use again)
-{overused if overused else "none"}
-
-## Open questions to explore (pick ONE)
-1. Does group-specific routing (use carryover layer per group) beat universal threshold?
-   → script: run_qwen_anchor_carryover_probe.py or run_qwen_geometry_generation_calibration.py
-2. Does attention mass from suffix to anchor span peak at L4-L8? (beacon hypothesis)
-   → script: run_qwen_anchor_geometry_probe.py
-3. Does anchor improve generation on flat cases? What is rescue_rate?
-   → script: run_qwen_geometry_generation_calibration.py
-4. Is contradiction_proof failure case geometric anomaly?
-   → script: run_qwen_phase_probe.py with different group filter
-
-## Completed experiments ({len(completed)} total)
-{json.dumps(completed[-5:], indent=2)} ... (showing last 5)
-
-## Available scripts
-{available_scripts}
-
-## Budget remaining
-{state['budget_remaining']} experiments
-
-## Script template (use this if writing a new script)
-```python
-from __future__ import annotations
-import argparse, json, sys
-from pathlib import Path
-import torch
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from src.data.qwen_anchor_geometry_cases import make_qwen_anchor_geometry_cases, list_anchor_span_profiles
-from src.model.config import TOY_CONFIG
-from src.model.qwen_anchor_overlay import QwenAnchorOverlay
-from src.utils.qwen_anchor_cartography import (
-    build_neutral_basis_by_layer, build_group_concept_vectors,
-    cosine_or_none, encode_focus_span, project_out_basis, span_mean_hidden_for_layer, SpanEncoding,
-)
-from src.utils.anchor_geometry import list_model_layers
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="Qwen/Qwen3.5-4B")
-    parser.add_argument("--anchor-profile", default="medium")
-    parser.add_argument("--output", default=str(ROOT / "archive" / "my_probe.json"))
-    args, _ = parser.parse_known_args()  # ignore unknown args
-
-    config = TOY_CONFIG
-    overlay = QwenAnchorOverlay(args.model, config=config)
-    overlay.load()
-    layers = list_model_layers(overlay)
-    cases = make_qwen_anchor_geometry_cases(anchor_profile=args.anchor_profile)
-    neutral_cases = cases  # or make_qwen_anchor_neutral_cases()
-
-    results = []
-    for case in cases:
-        enc: SpanEncoding = encode_focus_span(overlay, case)
-        # enc.hidden_states[layer+1][0] -> tensor [seq_len, hidden_dim]
-        # enc.span_match.token_start/end -> anchor token positions
-        result = {{"name": case.name, "group": case.group}}
-        # ... your analysis here ...
-        results.append(result)
-
-    output = {{"metadata": {{"model": args.model, "profile": args.anchor_profile}}, "results": results}}
-    Path(args.output).parent.mkdir(exist_ok=True)
-    json.dump(output, open(args.output, "w"), indent=2)
-    print(f"Saved: {{args.output}}")
-
-if __name__ == "__main__":
-    main()
-```
-
-## Your task
-Propose ONE new experiment targeting an OPEN QUESTION above.
-Do NOT repeat phase_probe if it is in blocked scripts.
-You MAY write a completely new script if no existing script fits.
-
-Respond with ONLY valid JSON, no markdown, no explanation:
-{{
-  "id": "unique_hypothesis_id",
-  "description": "one sentence what this tests",
-  "script": "run_qwen_llm_<id>.py",
-  "args": {{"anchor_profile": "medium"}},
-  "result_key": "results.0.some_metric",
-  "success_threshold": 0.4,
-  "reasoning": "why this experiment now",
-  "script_code": "# OPTIONAL: full Python script code if writing new script; omit if using existing"
-}}"""
+    prompt = (
+        "You are the Strategist for ABPT — Anchor-Based Probing Tool research on Qwen3.5-4B.\n\n"
+        "## CONFIRMED FINDINGS (do NOT re-test)\n"
+        "- tail_retention_ratio predicts constraint_score rho=+0.642 (CONFIRMED)\n"
+        "- early_slope_4_8 does NOT predict (rho=-0.14, NEGATIVE)\n"
+        "- Crystallization zone: L4-L8\n"
+        "- Carryover layers: json=L11, contradiction=L25, DI=L24, binary=L10, vegan=L11\n\n"
+        "## BLOCKED SCRIPTS (used 3+ times, do NOT propose again)\n"
+        + _blocked + "\n\n"
+        "## Open questions (pick ONE)\n"
+        "1. Group-specific routing vs universal threshold → run_qwen_anchor_carryover_probe.py\n"
+        "2. Attention beacon: does attention mass peak at L4-L8? → run_qwen_anchor_geometry_probe.py\n"
+        "3. Rescue rate on flat cases → run_qwen_geometry_generation_calibration.py\n"
+        "4. Write a NEW script to test tail_retention_ratio as routing gate\n\n"
+        "## Completed experiments (last 5 of " + str(len(completed)) + ")\n"
+        + _completed_json + "\n\n"
+        "## Available scripts\n" + _scripts + "\n\n"
+        "## Budget: " + _budget + " experiments remaining\n\n"
+        "## Script API (if writing new script)\n"
+        "- overlay = QwenAnchorOverlay(model); overlay.load()\n"
+        "- cases = make_qwen_anchor_geometry_cases(anchor_profile='medium')\n"
+        "- enc = encode_focus_span(overlay, case)  # returns SpanEncoding\n"
+        "- enc.hidden_states[layer+1][0] -> tensor [seq_len, hidden_dim]\n"
+        "- Save to: ROOT / 'archive' / 'my_output.json'\n"
+        "- Imports: from src.model.qwen_anchor_overlay import QwenAnchorOverlay\n"
+        "- from src.data.qwen_anchor_geometry_cases import make_qwen_anchor_geometry_cases\n"
+        "- from src.utils.qwen_anchor_cartography import encode_focus_span, build_group_concept_vectors\n"
+        "- from src.utils.anchor_geometry import list_model_layers\n"
+        "- from src.model.config import TOY_CONFIG\n\n"
+        "Respond with ONLY valid JSON (no markdown, no comments):\n"
+        '{"id": "...", "description": "...", "script": "run_qwen_....py", '
+        '"args": {"anchor_profile": "medium"}, "result_key": "...", '
+        '"success_threshold": 0.4, "reasoning": "...", '
+        '"script_code": "# omit this field if using existing script"}'
+    )
 
     def _call_llm(prompt: str) -> str | None:
         # DeepSeek (приоритет — самый дешёвый)
