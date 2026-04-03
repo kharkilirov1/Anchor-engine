@@ -198,21 +198,38 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
         for exp in phase_data.get("experiments", [])
     ]
 
+    # Подсчёт использования скриптов — чтобы не зацикливаться
+    script_usage: dict[str, int] = {}
+    for phase_data in state["phases"].values():
+        for exp in phase_data.get("experiments", []):
+            s = exp.get("script", "")
+            script_usage[s] = script_usage.get(s, 0) + 1
+
+    overused = [s for s, count in script_usage.items() if count >= 3]
+
     prompt = f"""You are the Strategist for ABPT — Anchor-Based Probing Tool research on Qwen3.5-4B.
 
-## Research context
-Goal: understand how anchor spans in the prompt affect hidden state geometry and generation quality.
+## CONFIRMED FINDINGS (do NOT re-test these)
+- tail_retention_ratio predicts constraint_score with rho=+0.642 (CONFIRMED, strong signal)
+- early_slope_4_8 does NOT predict (rho=-0.14, CONFIRMED NEGATIVE)
+- Crystallization zone: L4-L8
+- Group carryover layers: json=L11, contradiction=L25, DI=L24, binary=L10, vegan=L11
 
-Key findings so far:
-- Crystallization zone: L4-L8 (r1 rises here, but slowly — NOT a sharp peak)
-- early_slope_4_8 does NOT predict constraint_score (rho=-0.14 medium, -0.27 short)
-- tail_retention_ratio DOES predict constraint_score (rho=+0.642 medium profile)
-  = auc(L9-L23) / auc(L4-L8) — how much signal survives after crystallization zone
-- group-specific carryover layers: json=L11, contradiction=L25, DI=L24, binary=L10, vegan=L11
-- anchor mechanism = attention beacon hypothesis (not residual rewrite)
+## BLOCKED SCRIPTS (used 3+ times, do NOT use again)
+{overused if overused else "none"}
 
-## Completed experiments
-{json.dumps(completed, indent=2)}
+## Open questions to explore (pick ONE)
+1. Does group-specific routing (use carryover layer per group) beat universal threshold?
+   → script: run_qwen_anchor_carryover_probe.py or run_qwen_geometry_generation_calibration.py
+2. Does attention mass from suffix to anchor span peak at L4-L8? (beacon hypothesis)
+   → script: run_qwen_anchor_geometry_probe.py
+3. Does anchor improve generation on flat cases? What is rescue_rate?
+   → script: run_qwen_geometry_generation_calibration.py
+4. Is contradiction_proof failure case geometric anomaly?
+   → script: run_qwen_phase_probe.py with different group filter
+
+## Completed experiments ({len(completed)} total)
+{json.dumps(completed[-5:], indent=2)} ... (showing last 5)
 
 ## Available scripts
 {available_scripts}
@@ -220,14 +237,10 @@ Key findings so far:
 ## Budget remaining
 {state['budget_remaining']} experiments
 
-## Playbook (last 3000 chars)
-{playbook[-3000:]}
-
 ## Your task
-Propose the SINGLE most valuable next experiment. You are FREE to:
-- Design a new hypothesis not in the original list
-- Use any available script with any valid arguments
-- Focus on what would most advance understanding
+Propose ONE new experiment targeting an OPEN QUESTION above.
+Do NOT repeat phase_probe if it is in blocked scripts.
+Focus on scripts NOT yet used or used fewer than 3 times.
 
 Respond with ONLY valid JSON, no markdown, no explanation:
 {{
