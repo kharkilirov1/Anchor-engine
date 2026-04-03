@@ -492,7 +492,7 @@ def run_loop(
 ) -> None:
     state = load_state()
     if budget is not None:
-        state["budget_remaining"] = min(budget, state["budget_remaining"])
+        state["budget_remaining"] = budget  # override: --budget always wins
 
     # Добавляем поле model в known_facts если нет
     if "model" not in state["known_facts"]:
