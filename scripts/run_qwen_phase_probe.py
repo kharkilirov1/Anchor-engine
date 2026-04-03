@@ -402,7 +402,7 @@ def run(
     overlay.to(device)
     overlay.eval()
 
-    n_layers = overlay.base_model.config.num_hidden_layers
+    n_layers = int(overlay.model_num_hidden_layers)
     probe_layers = list(range(n_layers))
     print(f"[PhaseProbe] Слоёв: {n_layers}")
 
