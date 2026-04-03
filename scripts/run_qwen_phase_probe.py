@@ -54,7 +54,7 @@ from src.utils.anchor_geometry import (
     list_model_layers,
     select_tail_probe_layers,
 )
-from src.utils.qwen_tokenizer_utils import (
+from src.utils.anchor_geometry import (
     decode_token_pieces,
     decode_token_surfaces,
     match_anchor_span,
