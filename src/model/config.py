@@ -123,6 +123,14 @@ CONFIG_500M = ModelConfig(
     use_verifier=True, use_plastic=True,
 )
 
+CONFIG_150M = ModelConfig(
+    vocab_size=32000, d_model=768, n_heads=12,
+    n_layers=12, d_ff=3072, max_seq_len=256,
+    batch_size=2, plastic_hidden=128,
+    use_attn_res=True, use_branches=True,
+    use_verifier=True, use_plastic=True,
+)
+
 PRESETS = {
     "baseline-0": BASELINE_0,
     "baseline-1-attnres": BASELINE_1_ATTNRES,
@@ -131,4 +139,5 @@ PRESETS = {
     "full": FULL_MODEL,
     "toy": TOY_CONFIG,
     "500m": CONFIG_500M,
+    "150m": CONFIG_150M,
 }
