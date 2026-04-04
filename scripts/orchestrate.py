@@ -38,6 +38,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 STATE_FILE   = ROOT / "research_state.json"
 PLAYBOOK_FILE = ROOT / "playbook.md"
 ARCHIVE_DIR  = ROOT / "archive"
@@ -52,16 +57,19 @@ SEPARATOR = "─" * 60
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_state() -> dict[str, Any]:
-    return json.loads(STATE_FILE.read_text())
+    return json.loads(STATE_FILE.read_text(encoding="utf-8"))
 
 
 def save_state(state: dict[str, Any]) -> None:
-    STATE_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    STATE_FILE.write_text(
+        json.dumps(state, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def log_event(event: dict[str, Any]) -> None:
     event["timestamp"] = datetime.now(UTC).isoformat()
-    with LOG_FILE.open("a") as f:
+    with LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
@@ -432,7 +440,7 @@ def analyzer_parse_result(hyp_id: str, worker_output: dict[str, Any]) -> dict[st
     print(f"[Analyzer] Читаю: {latest.name}")
 
     try:
-        data = json.loads(latest.read_text())
+        data = json.loads(latest.read_text(encoding="utf-8"))
     except Exception as e:
         return {"metric_value": None, "note": f"JSON parse error: {e}"}
 
@@ -496,9 +504,9 @@ def analyzer_update_playbook(hyp_id: str, analysis: dict[str, Any], state: dict[
     if analysis.get("best_predictor"):
         new_entry += f"\n**Лучший предиктор:** `{analysis['best_predictor']}` (|ρ|={analysis.get('best_rho', 0):.3f})\n"
 
-    playbook_text = PLAYBOOK_FILE.read_text()
+    playbook_text = PLAYBOOK_FILE.read_text(encoding="utf-8")
     playbook_text += new_entry
-    PLAYBOOK_FILE.write_text(playbook_text)
+    PLAYBOOK_FILE.write_text(playbook_text, encoding="utf-8")
     print(f"[Analyzer] Playbook обновлён ({verdict})")
 
 
@@ -604,7 +612,7 @@ def run_loop(
     if "model" not in state["known_facts"]:
         state["known_facts"]["model"] = state.get("model", "Qwen/Qwen3.5-4B")
 
-    playbook = PLAYBOOK_FILE.read_text() if PLAYBOOK_FILE.exists() else ""
+    playbook = PLAYBOOK_FILE.read_text(encoding="utf-8") if PLAYBOOK_FILE.exists() else ""
 
     print(f"\n{'═'*60}")
     print(f"🔬 ABPT Orchestrator запущен")
@@ -633,7 +641,7 @@ def run_loop(
                 script_code = llm_proposal.get("script_code", "")
                 if script_code and script_code.strip():
                     script_path = SCRIPTS_DIR / script_name
-                    script_path.write_text(script_code)
+                    script_path.write_text(script_code, encoding="utf-8")
                     print(f"[Strategist/LLM] Написан новый скрипт: {script_name} ({len(script_code)} chars)")
 
                 EXPERIMENT_REGISTRY[hyp_id] = {
@@ -691,7 +699,7 @@ def run_loop(
         analyzer_update_playbook(hyp_id, analysis, state)
         analyzer_update_state(hyp_id, analysis, worker_output, state)
 
-        playbook = PLAYBOOK_FILE.read_text()  # обновить после записи
+        playbook = PLAYBOOK_FILE.read_text(encoding="utf-8")  # обновить после записи
 
         log_event({
             "event": "experiment_done",

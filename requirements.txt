@@ -7,3 +7,6 @@ huggingface_hub>=0.20
 # optional fallback path for some dataset loaders
 datasets>=2.18
 transformers>=4.40
+openai>=1.0
+# optional if using Anthropic as LLM strategist backend
+anthropic>=0.34
