@@ -31,6 +31,14 @@ def test_build_worker_command_normalizes_known_script_args() -> None:
     assert "--profiles" in carryover_command
     assert "--anchor-profile" not in carryover_command
 
+    hyp_def_layer_profile = {
+        "script": "run_qwen_anchor_layer_profile_map.py",
+        "default_args": {"anchor_profile": "medium"},
+    }
+    layer_profile_command = orchestrate.build_worker_command(hyp_def_layer_profile, state)
+    assert "--profiles" in layer_profile_command
+    assert "--anchor-profile" not in layer_profile_command
+
 
 def test_analyzer_parse_result_uses_worker_output_file_and_synthesizes_carryover_summary(
     tmp_path: Path,
@@ -78,3 +86,61 @@ def test_analyzer_parse_result_uses_worker_output_file_and_synthesizes_carryover
     assert summary["output_file"] == output_path.name
     assert abs(float(summary["metric_value"]) - 0.2) < 1e-6
 
+
+def test_analyzer_parse_result_synthesizes_layer_profile_summary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_path = tmp_path / "qwen_anchor_layer_profile_map.json"
+    output_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"model_name": "Qwen/Qwen3.5-4B"},
+                "profiles": [
+                    {
+                        "profile": "medium",
+                        "case_summaries": [
+                            {
+                                "status": "ok",
+                                "mode_summaries": {
+                                    "trimmed_span": {"rank1_peak_layer": 7},
+                                    "full_span": {"rank1_peak_layer": 8},
+                                },
+                            },
+                            {
+                                "status": "ok",
+                                "mode_summaries": {
+                                    "trimmed_span": {"rank1_peak_layer": 9},
+                                    "full_span": {"rank1_peak_layer": 10},
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setitem(
+        orchestrate.EXPERIMENT_REGISTRY,
+        "TEST_LAYER_PROFILE",
+        {
+            "description": "test",
+            "phase": 1,
+            "script": "run_qwen_anchor_layer_profile_map.py",
+            "default_args": {"anchor_profile": "medium"},
+            "output_pattern": "archive/*.json",
+            "result_key": "summary.trimmed_rank1_peak_layer_mean",
+            "success_threshold": None,
+            "depends_on": [],
+        },
+    )
+
+    summary = orchestrate.analyzer_parse_result(
+        "TEST_LAYER_PROFILE",
+        {"status": "success", "output_file": str(output_path)},
+    )
+
+    assert summary["output_file"] == output_path.name
+    assert abs(float(summary["metric_value"]) - 8.0) < 1e-6

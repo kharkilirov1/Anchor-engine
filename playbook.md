@@ -38,7 +38,7 @@ Carryover = косинусное сходство между hidden state суф
 ### Anchor mechanism
 - **Гипотеза:** anchor = attention beacon, не rewrite hidden states
 - Carryover probe: near-zero delta в suffix hidden states → подтверждает beacon
-- Статус: **hypothesis** (нужна attention map верификация)
+- Статус: **partially_supported** (geometry probe after tokenization controls дал `partially_supported`; нужна paraphrase/attention верификация)
 
 ---
 
@@ -92,9 +92,17 @@ Carryover = косинусное сходство между hidden state суф
 
 ---
 
+## Последний прогон (2026-04-04)
+- `early_slope_4_8` снова не подтвердился: `ρ = -0.1449`
+- `tail_retention_ratio` остаётся сильнейшим сигналом: `ρ = +0.6419`
+- `group_routing_vs_universal_threshold` дал только слабый положительный эффект: `mean_last_token_delta = 0.0056`
+- `attention_beacon_crystallization_zone` вернул `partially_supported`, то есть гипотеза жива, но не закрыта
+
+---
+
 ## Открытые вопросы
-1. Коррелирует ли `early_slope_4_8` с `base_constraint_score`? (Фаза 1)
-2. Работает ли group-specific routing лучше universal threshold? (Фаза 2)
+1. Сохраняется ли сила `tail_retention_ratio` на short/long profiles, а не только на medium? (Фаза 1)
+2. Может ли group-specific routing показать **материальный** эффект выше текущего слабого `mean_last_token_delta=0.0056`? (Фаза 2)
 3. Отличается ли геометрия injection-anchor от легитимного anchor? (Фаза 3)
 4. Почему fastapi группа нестабильна в carryover?
 5. Почему contradiction_proof кейс даёт отрицательный delta?
@@ -106,5 +114,5 @@ Carryover = косинусное сходство между hidden state суф
 
 ---
 
-*Последнее обновление: 2026-04-03 (ручное)*
+*Последнее обновление: 2026-04-04 (ручное)*
 *Следующее обновление: автоматически после Фазы 1 phase_probe*

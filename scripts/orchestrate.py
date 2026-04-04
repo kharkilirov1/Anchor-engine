@@ -80,32 +80,32 @@ def log_event(event: dict[str, Any]) -> None:
 
 EXPERIMENT_REGISTRY: dict[str, dict[str, Any]] = {
     "H1": {
-        "description": "Verify early_slope_4_8 predicts base_constraint_score",
+        "description": "Verify tail_retention_ratio predicts base_constraint_score",
         "phase": 1,
         "script": "run_qwen_phase_probe.py",
         "default_args": {"anchor_profile": "medium", "tau": "0.5"},
         "output_pattern": "archive/*_phase_probe_medium.json",
-        "result_key": "correlation_summary.spearman_early_slope_4_8_vs_base_constraint",
+        "result_key": "correlation_summary.all_metrics.tail_retention_ratio",
         "success_threshold": 0.4,
         "depends_on": [],
     },
     "H1_short": {
-        "description": "Phase probe with short anchor profile",
+        "description": "Validate tail_retention_ratio on short anchor profile",
         "phase": 1,
         "script": "run_qwen_phase_probe.py",
         "default_args": {"anchor_profile": "short", "tau": "0.5"},
         "output_pattern": "archive/*_phase_probe_short.json",
-        "result_key": "correlation_summary.spearman_early_slope_4_8_vs_base_constraint",
+        "result_key": "correlation_summary.all_metrics.tail_retention_ratio",
         "success_threshold": 0.4,
         "depends_on": ["H1"],
     },
     "H1_long": {
-        "description": "Phase probe with long anchor profile",
+        "description": "Validate tail_retention_ratio on long anchor profile",
         "phase": 1,
         "script": "run_qwen_phase_probe.py",
         "default_args": {"anchor_profile": "long", "tau": "0.5"},
         "output_pattern": "archive/*_phase_probe_long.json",
-        "result_key": "correlation_summary.spearman_early_slope_4_8_vs_base_constraint",
+        "result_key": "correlation_summary.all_metrics.tail_retention_ratio",
         "success_threshold": 0.4,
         "depends_on": ["H1"],
     },
@@ -120,13 +120,13 @@ EXPERIMENT_REGISTRY: dict[str, dict[str, Any]] = {
         "depends_on": ["H1"],
     },
     "H2": {
-        "description": "Group-specific routing vs universal threshold",
+        "description": "Measure whether group-specific carryover materially beats universal threshold",
         "phase": 2,
         "script": "run_qwen_anchor_carryover_probe.py",
         "default_args": {"anchor_profile": "medium"},
         "output_pattern": "archive/qwen_anchor_carryover_probe.json",
         "result_key": "summary.mean_last_token_delta",
-        "success_threshold": 0.0,
+        "success_threshold": 0.02,
         "depends_on": ["H1"],
     },
     "H3": {
@@ -159,7 +159,14 @@ SCRIPT_RUNTIME_METADATA: dict[str, dict[str, Any]] = {
         "arg_aliases": {"anchor_profile": "profiles"},
         "canonical_output_pattern": "archive/qwen_anchor_carryover_probe.json",
         "canonical_result_key": "summary.mean_last_token_delta",
-        "canonical_success_threshold": 0.0,
+        "canonical_success_threshold": 0.02,
+    },
+    "run_qwen_anchor_layer_profile_map.py": {
+        "model_arg": "model",
+        "arg_aliases": {"anchor_profile": "profiles"},
+        "canonical_output_pattern": "archive/qwen_anchor_layer_profile_map.json",
+        "canonical_result_key": "summary.trimmed_rank1_peak_layer_mean",
+        "canonical_success_threshold": None,
     },
 }
 
@@ -284,13 +291,18 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
         "- early_slope_4_8 does NOT predict (rho=-0.14, NEGATIVE)\n"
         "- Crystallization zone: L4-L8\n"
         "- Carryover layers: json=L11, contradiction=L25, DI=L24, binary=L10, vegan=L11\n\n"
+        "## LATEST RUN TAKEAWAYS\n"
+        "- group_routing_vs_universal_threshold gave only weak positive mean_last_token_delta=0.0056\n"
+        "- attention_beacon_crystallization_zone returned partially_supported\n"
+        "- do not claim routing is solved yet; look for stronger evidence or better controls\n\n"
         "## BLOCKED SCRIPTS (used 3+ times, do NOT propose again)\n"
         + _blocked + "\n\n"
         "## Open questions (pick ONE)\n"
-        "1. Group-specific routing vs universal threshold → run_qwen_anchor_carryover_probe.py (use args {\"profiles\": [\"medium\"]})\n"
-        "2. Attention beacon: does geometry support a crystallization zone? → run_qwen_anchor_geometry_probe.py (no anchor_profile arg)\n"
-        "3. Rescue rate on flat cases → run_qwen_geometry_generation_calibration.py\n"
-        "4. Write a NEW script to test tail_retention_ratio as routing gate\n\n"
+        "1. Does tail_retention_ratio stay predictive on short/long profiles? → run_qwen_phase_probe.py\n"
+        "2. Can group-specific routing show a materially stronger effect than 0.0056? → run_qwen_anchor_carryover_probe.py (use args {\"profiles\": [\"medium\"]})\n"
+        "3. Can beacon/crystallization support move from partially_supported to stronger evidence? → run_qwen_anchor_geometry_probe.py (no anchor_profile arg)\n"
+        "4. Rescue rate on flat cases → run_qwen_geometry_generation_calibration.py\n"
+        "5. Write a NEW script to test tail_retention_ratio as routing gate\n\n"
         "## Completed experiments (last 5 of " + str(len(completed)) + ")\n"
         + _completed_json + "\n\n"
         "## Available scripts\n" + _scripts + "\n\n"
@@ -299,6 +311,7 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
         "- Existing scripts must use their real CLI flags; do not invent args like anchor_profile for scripts that do not accept it.\n"
         "- run_qwen_anchor_geometry_probe.py returns interpretation.support_after_tokenization_controls\n"
         "- run_qwen_anchor_carryover_probe.py returns summary values derived from delta_summary across cases\n"
+        "- run_qwen_anchor_layer_profile_map.py is descriptive; it uses args {\"profiles\": [...]} and returns summary.trimmed_rank1_peak_layer_mean, not a correlation metric\n"
         "- overlay = QwenAnchorOverlay(model); overlay.load()\n"
         "- cases = make_qwen_anchor_geometry_cases(anchor_profile='medium')\n"
         "- enc = encode_focus_span(overlay, case)  # returns SpanEncoding\n"
@@ -545,10 +558,40 @@ def _summarize_carryover_probe(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _summarize_layer_profile_map(data: dict[str, Any]) -> dict[str, Any]:
+    case_summaries = [
+        case_summary
+        for profile in data.get("profiles", [])
+        if isinstance(profile, dict)
+        for case_summary in profile.get("case_summaries", [])
+        if isinstance(case_summary, dict) and case_summary.get("status") == "ok"
+    ]
+
+    def _collect(mode_name: str, field_name: str) -> list[float]:
+        values: list[float] = []
+        for case_summary in case_summaries:
+            mode_summary = dict(case_summary.get("mode_summaries", {}).get(mode_name, {}))
+            value = mode_summary.get(field_name)
+            if value is not None:
+                values.append(float(value))
+        return values
+
+    trimmed_rank1 = _collect("trimmed_span", "rank1_peak_layer")
+    full_rank1 = _collect("full_span", "rank1_peak_layer")
+    return {
+        "profile_count": len(data.get("profiles", [])),
+        "case_count": len(case_summaries),
+        "trimmed_rank1_peak_layer_mean": float(sum(trimmed_rank1) / len(trimmed_rank1)) if trimmed_rank1 else None,
+        "full_rank1_peak_layer_mean": float(sum(full_rank1) / len(full_rank1)) if full_rank1 else None,
+    }
+
+
 def _augment_probe_payload(data: dict[str, Any], output_name: str) -> dict[str, Any]:
     augmented = dict(data)
     if "carryover_probe" in output_name and "summary" not in augmented:
         augmented["summary"] = _summarize_carryover_probe(augmented)
+    if "layer_profile_map" in output_name and "summary" not in augmented:
+        augmented["summary"] = _summarize_layer_profile_map(augmented)
     return augmented
 
 

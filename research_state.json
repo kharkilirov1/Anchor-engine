@@ -1,35 +1,35 @@
 {
   "version": "1.0",
-  "project": "ABPT \u2014 Anchor-Based Probing Tool",
+  "project": "ABPT — Anchor-Based Probing Tool",
   "model": "Qwen/Qwen3.5-4B",
   "created_at": "2026-04-03",
-  "last_updated": "2026-04-03",
+  "last_updated": "2026-04-04",
   "current_phase": 1,
   "budget_remaining": 10,
   "experiments_run": 0,
   "experiments_max": 50,
-  "metric_primary": "spearman_rho_early_slope_vs_constraint",
+  "metric_primary": "spearman_rho_tail_retention_vs_constraint",
   "metric_secondary": "constraint_rescue_rate",
   "metric_history": [],
   "phases": {
     "1": {
       "name": "Geometry Verification",
-      "goal": "Confirm that early_slope_4_8 predicts base_constraint_score",
+      "goal": "Confirm that tail_retention_ratio predicts base_constraint_score and generalizes across anchor profiles",
       "status": "pending",
-      "success_criterion": "|rho| > 0.4 for early_slope_4_8 vs base_constraint_score",
+      "success_criterion": "|rho| > 0.4 for tail_retention_ratio vs base_constraint_score",
       "experiments": []
     },
     "2": {
       "name": "Group-Specific Routing",
-      "goal": "Replace universal threshold with group-aware carryover layer routing",
-      "status": "blocked_on_phase_1",
-      "success_criterion": "routing_delta > 0.077 (beat flat_failure_gated baseline)",
+      "goal": "Show that group-specific carryover routing materially beats a universal threshold",
+      "status": "pending",
+      "success_criterion": "mean_last_token_delta > 0.02 with consistent per-group separation",
       "experiments": []
     },
     "3": {
       "name": "Injection Detection",
       "goal": "Detect prompt injections via geometric anomaly in anchor span",
-      "status": "blocked_on_phase_1",
+      "status": "pending",
       "success_criterion": "injection_auc > 0.7 (ROC AUC on injection vs clean cases)",
       "experiments": []
     },
@@ -73,41 +73,45 @@
     "best_policy_so_far": "flat_failure_gated",
     "best_delta_so_far": 0.077,
     "n_cases_current": 13,
-    "n_flat_rescue_cases": 1
+    "n_flat_rescue_cases": 1,
+    "tail_retention_ratio_rho_medium": 0.6418597254355983,
+    "early_slope_rho_medium": -0.1449360670338448,
+    "group_routing_mean_last_token_delta_medium": 0.005595570859441068,
+    "attention_support_after_tokenization_controls": "partially_supported"
   },
   "open_hypotheses": [
     {
       "id": "H1",
-      "statement": "early_slope_4_8 negatively correlates with base_constraint_score",
+      "statement": "tail_retention_ratio remains predictive across short and long anchor profiles",
       "phase": 1,
       "script": "run_qwen_phase_probe.py",
       "status": "untested"
     },
     {
       "id": "H2",
-      "statement": "group-specific carryover routing outperforms universal threshold",
+      "statement": "group-specific carryover routing must exceed the weak medium-profile delta and beat a universal threshold materially",
       "phase": 2,
-      "script": "run_qwen_group_routing_probe.py",
-      "status": "untested",
+      "script": "run_qwen_anchor_carryover_probe.py",
+      "status": "partial",
       "depends_on": "H1"
     },
     {
       "id": "H3",
-      "statement": "injection anchor has different carryover layer than legitimate anchor of same group",
+      "statement": "injection anchor has different carryover geometry than a legitimate anchor of the same group",
       "phase": 3,
       "script": "run_qwen_injection_geometry_probe.py",
       "status": "untested"
     },
     {
       "id": "H4",
-      "statement": "attention mass from suffix to anchor span peaks at L4-L8 (attention beacon)",
+      "statement": "beacon/crystallization evidence becomes stable under stronger tokenization and paraphrase controls",
       "phase": 1,
-      "script": "run_qwen_attention_corroboration_probe.py",
-      "status": "untested"
+      "script": "run_qwen_anchor_geometry_probe.py",
+      "status": "partial"
     },
     {
       "id": "H5",
-      "statement": "contradiction_proof failure caused by template cluster geometry suppressing constraint",
+      "statement": "contradiction_proof failure is caused by template-cluster geometry suppressing constraint retention",
       "phase": 1,
       "script": "run_qwen_phase_probe.py",
       "status": "untested"
@@ -117,26 +121,31 @@
     {
       "id": "DH1",
       "statement": "single universal reference layer is stable across prompt variations",
-      "evidence": "mature_layer shifted L21\u2192L28 between runs; anchor sweep: 0 wins all profiles"
+      "evidence": "mature_layer shifted L21→L28 between runs; anchor sweep: 0 wins all profiles"
     },
     {
       "id": "DH2",
       "statement": "longer anchor spans produce stronger signal",
       "evidence": "concept norm: short=68, medium=64, long=58; signal degrades with length"
+    },
+    {
+      "id": "DH3",
+      "statement": "early_slope_4_8 is a strong routing signal for base_constraint_score",
+      "evidence": "medium-profile phase probe on 2026-04-04 gave rho=-0.1449, while tail_retention_ratio reached rho=+0.6419"
     }
   ],
   "next_experiment": {
-    "id": "EXP-001",
+    "id": "EXP-002",
     "phase": 1,
-    "hypothesis": "H1",
+    "hypothesis": "H1_short",
     "script": "run_qwen_phase_probe.py",
     "args": {
       "model": "Qwen/Qwen3.5-4B",
-      "anchor_profile": "medium",
+      "anchor_profile": "short",
       "tau": 0.5
     },
-    "expected_output": "archive/qwen35_4b_phase_probe_medium.json",
-    "success_metric": "correlation_summary.spearman_early_slope_4_8_vs_base_constraint",
+    "expected_output": "archive/qwen35_4b_phase_probe_short.json",
+    "success_metric": "correlation_summary.all_metrics.tail_retention_ratio",
     "success_threshold": 0.4,
     "status": "ready"
   }
