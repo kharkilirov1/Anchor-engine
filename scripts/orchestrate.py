@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -111,20 +112,20 @@ EXPERIMENT_REGISTRY: dict[str, dict[str, Any]] = {
     "H4": {
         "description": "Attention corroboration — beacon hypothesis",
         "phase": 1,
-        "script": "run_qwen_attention_corroboration_probe.py",
+        "script": "run_qwen_anchor_geometry_probe.py",
         "default_args": {"anchor_profile": "medium"},
-        "output_pattern": "archive/*_attention_corroboration_*.json",
-        "result_key": "summary.peak_attention_zone",
+        "output_pattern": "archive/qwen_anchor_geometry_probe.json",
+        "result_key": "interpretation.support_after_tokenization_controls",
         "success_threshold": None,  # qualitative
         "depends_on": ["H1"],
     },
     "H2": {
         "description": "Group-specific routing vs universal threshold",
         "phase": 2,
-        "script": "run_qwen_group_routing_probe.py",
+        "script": "run_qwen_anchor_carryover_probe.py",
         "default_args": {"anchor_profile": "medium"},
-        "output_pattern": "archive/*_group_routing_*.json",
-        "result_key": "summary.routing_delta_vs_flat_failure_gated",
+        "output_pattern": "archive/qwen_anchor_carryover_probe.json",
+        "result_key": "summary.mean_last_token_delta",
         "success_threshold": 0.0,
         "depends_on": ["H1"],
     },
@@ -137,6 +138,28 @@ EXPERIMENT_REGISTRY: dict[str, dict[str, Any]] = {
         "result_key": "summary.detection_auc",
         "success_threshold": 0.7,
         "depends_on": ["H1"],
+    },
+}
+
+SCRIPT_RUNTIME_METADATA: dict[str, dict[str, Any]] = {
+    "run_qwen_phase_probe.py": {
+        "model_arg": "model",
+        "arg_aliases": {},
+        "canonical_output_pattern": "archive/*_phase_probe_*.json",
+    },
+    "run_qwen_anchor_geometry_probe.py": {
+        "model_arg": "model-name",
+        "arg_aliases": {"anchor_profile": None},
+        "canonical_output_pattern": "archive/qwen_anchor_geometry_probe.json",
+        "canonical_result_key": "interpretation.support_after_tokenization_controls",
+        "canonical_success_threshold": None,
+    },
+    "run_qwen_anchor_carryover_probe.py": {
+        "model_arg": "model",
+        "arg_aliases": {"anchor_profile": "profiles"},
+        "canonical_output_pattern": "archive/qwen_anchor_carryover_probe.json",
+        "canonical_result_key": "summary.mean_last_token_delta",
+        "canonical_success_threshold": 0.0,
     },
 }
 
@@ -181,6 +204,36 @@ def strategist_select_next(state: dict[str, Any], target_phase: int | None = Non
             return strategist_select_next(state, next_phase)
 
     return None
+
+
+def _normalize_script_args(script_name: str, raw_args: dict[str, Any]) -> dict[str, Any]:
+    meta = SCRIPT_RUNTIME_METADATA.get(script_name, {})
+    aliases = meta.get("arg_aliases", {})
+    normalized: dict[str, Any] = {}
+    for key, value in raw_args.items():
+        target_key = aliases.get(key, key)
+        if target_key is None:
+            continue
+        normalized[target_key] = value
+    return normalized
+
+
+def _apply_script_runtime_defaults(proposal: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(proposal)
+    script_name = str(normalized.get("script", ""))
+    meta = SCRIPT_RUNTIME_METADATA.get(script_name)
+    raw_args = normalized.get("args", {})
+    if isinstance(raw_args, dict):
+        normalized["args"] = _normalize_script_args(script_name, raw_args)
+    if not meta:
+        return normalized
+    if meta.get("canonical_output_pattern"):
+        normalized["output_pattern"] = meta["canonical_output_pattern"]
+    if "canonical_result_key" in meta:
+        normalized["result_key"] = meta["canonical_result_key"]
+    if "canonical_success_threshold" in meta:
+        normalized["success_threshold"] = meta["canonical_success_threshold"]
+    return normalized
 
 
 def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any] | None:
@@ -234,8 +287,8 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
         "## BLOCKED SCRIPTS (used 3+ times, do NOT propose again)\n"
         + _blocked + "\n\n"
         "## Open questions (pick ONE)\n"
-        "1. Group-specific routing vs universal threshold → run_qwen_anchor_carryover_probe.py\n"
-        "2. Attention beacon: does attention mass peak at L4-L8? → run_qwen_anchor_geometry_probe.py\n"
+        "1. Group-specific routing vs universal threshold → run_qwen_anchor_carryover_probe.py (use args {\"profiles\": [\"medium\"]})\n"
+        "2. Attention beacon: does geometry support a crystallization zone? → run_qwen_anchor_geometry_probe.py (no anchor_profile arg)\n"
         "3. Rescue rate on flat cases → run_qwen_geometry_generation_calibration.py\n"
         "4. Write a NEW script to test tail_retention_ratio as routing gate\n\n"
         "## Completed experiments (last 5 of " + str(len(completed)) + ")\n"
@@ -243,6 +296,9 @@ def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any
         "## Available scripts\n" + _scripts + "\n\n"
         "## Budget: " + _budget + " experiments remaining\n\n"
         "## Script API (if writing new script)\n"
+        "- Existing scripts must use their real CLI flags; do not invent args like anchor_profile for scripts that do not accept it.\n"
+        "- run_qwen_anchor_geometry_probe.py returns interpretation.support_after_tokenization_controls\n"
+        "- run_qwen_anchor_carryover_probe.py returns summary values derived from delta_summary across cases\n"
         "- overlay = QwenAnchorOverlay(model); overlay.load()\n"
         "- cases = make_qwen_anchor_geometry_cases(anchor_profile='medium')\n"
         "- enc = encode_focus_span(overlay, case)  # returns SpanEncoding\n"
@@ -359,11 +415,7 @@ def worker_run(
         print(f"[Worker] SKIP — скрипт не найден: {script_path}")
         return {"status": "skipped", "reason": f"script not found: {hyp_def['script']}"}
 
-    model = state["known_facts"]["model"].replace("/", "_").lower().replace("-", "_").replace(".", "")
-    args = [sys.executable, str(script_path)]
-    for key, val in hyp_def["default_args"].items():
-        args += [f"--{key.replace('_', '-')}", str(val)]
-    args += ["--model", state.get("model", "Qwen/Qwen3.5-4B")]
+    args = build_worker_command(hyp_def, state)
 
     print(f"[Worker] Команда: {' '.join(args)}")
 
@@ -389,6 +441,7 @@ def worker_run(
             "elapsed_seconds": round(elapsed),
             "stdout_tail": result.stdout[-3000:] if result.stdout else "",
             "stderr_tail": result.stderr[-1000:] if result.stderr else "",
+            "output_file": extract_saved_output_path(result.stdout or "", result.stderr or ""),
         }
 
         if not success:
@@ -405,6 +458,41 @@ def worker_run(
         return {"status": "error", "error": str(e)}
 
 
+def build_worker_command(hyp_def: dict[str, Any], state: dict[str, Any]) -> list[str]:
+    script_name = str(hyp_def["script"])
+    script_path = SCRIPTS_DIR / script_name
+    meta = SCRIPT_RUNTIME_METADATA.get(script_name, {})
+    model_arg = str(meta.get("model_arg", "model"))
+    args = [sys.executable, str(script_path)]
+    normalized_args = _normalize_script_args(script_name, hyp_def.get("default_args", {}))
+    for key, val in normalized_args.items():
+        cli_key = f"--{str(key).replace('_', '-')}"
+        if isinstance(val, (list, tuple)):
+            args.append(cli_key)
+            args.extend(str(item) for item in val)
+        else:
+            args += [cli_key, str(val)]
+    args += [f"--{model_arg}", state.get("model", "Qwen/Qwen3.5-4B")]
+    return args
+
+
+def extract_saved_output_path(stdout: str, stderr: str = "") -> str | None:
+    combined = "\n".join(part for part in [stdout, stderr] if part)
+    for pattern in (
+        r"saved_json=(?P<path>[^\r\n]+)",
+        r"saved json:\s*(?P<path>[^\r\n]+)",
+        r"saved_json:\s*(?P<path>[^\r\n]+)",
+    ):
+        match = re.search(pattern, combined, flags=re.IGNORECASE)
+        if match:
+            raw_path = match.group("path").strip().strip("'\"")
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = ROOT / candidate
+            return str(candidate)
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Analyzer — читает результат и обновляет state + playbook
 # ─────────────────────────────────────────────────────────────────────────────
@@ -412,13 +500,56 @@ def worker_run(
 def _nested_get(d: dict, key_path: str) -> Any:
     """Получить вложенное значение по пути 'a.b.c'."""
     parts = key_path.split(".")
-    val = d
+    val: Any = d
     for part in parts:
         if isinstance(val, dict):
             val = val.get(part)
+        elif isinstance(val, list):
+            if not part.isdigit():
+                return None
+            index = int(part)
+            if index < 0 or index >= len(val):
+                return None
+            val = val[index]
         else:
             return None
     return val
+
+
+def _summarize_carryover_probe(data: dict[str, Any]) -> dict[str, Any]:
+    cases = [
+        case
+        for profile in data.get("profiles", [])
+        if isinstance(profile, dict)
+        for case in profile.get("cases", [])
+        if isinstance(case, dict)
+    ]
+    peak_values = [
+        float(summary["peak_delta_value"])
+        for case in cases
+        if isinstance((summary := case.get("delta_summary")), dict)
+        and summary.get("peak_delta_value") is not None
+    ]
+    last_token_values = [
+        float(summary["mean_delta_last_token"])
+        for case in cases
+        if isinstance((summary := case.get("delta_summary")), dict)
+        and summary.get("mean_delta_last_token") is not None
+    ]
+    return {
+        "profile_count": len(data.get("profiles", [])),
+        "case_count": len(cases),
+        "mean_peak_delta_value": float(sum(peak_values) / len(peak_values)) if peak_values else None,
+        "max_peak_delta_value": max(peak_values) if peak_values else None,
+        "mean_last_token_delta": float(sum(last_token_values) / len(last_token_values)) if last_token_values else None,
+    }
+
+
+def _augment_probe_payload(data: dict[str, Any], output_name: str) -> dict[str, Any]:
+    augmented = dict(data)
+    if "carryover_probe" in output_name and "summary" not in augmented:
+        augmented["summary"] = _summarize_carryover_probe(augmented)
+    return augmented
 
 
 def analyzer_parse_result(hyp_id: str, worker_output: dict[str, Any]) -> dict[str, Any]:
@@ -426,17 +557,21 @@ def analyzer_parse_result(hyp_id: str, worker_output: dict[str, Any]) -> dict[st
     hyp_def = EXPERIMENT_REGISTRY[hyp_id]
     result_key = hyp_def.get("result_key")
 
-    # Ищем свежие JSON файлы в archive
-    pattern = hyp_def["output_pattern"].replace("archive/", "")
-    matching = list(ARCHIVE_DIR.glob(pattern))
-    if not matching:
-        # Попробуем все JSON файлы, отсортируем по времени
-        matching = sorted(ARCHIVE_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    latest: Path | None = None
+    output_file = worker_output.get("output_file")
+    if output_file:
+        preferred = Path(str(output_file))
+        if preferred.exists():
+            latest = preferred
+        else:
+            return {"metric_value": None, "note": f"worker reported missing output file: {preferred}"}
+    if latest is None:
+        pattern = hyp_def["output_pattern"].replace("archive/", "")
+        matching = list(ARCHIVE_DIR.glob(pattern))
+        if not matching:
+            return {"metric_value": None, "note": f"no output file found for pattern: {hyp_def['output_pattern']}"}
+        latest = sorted(matching, key=lambda p: p.stat().st_mtime, reverse=True)[0]
 
-    if not matching:
-        return {"metric_value": None, "note": "no output file found"}
-
-    latest = sorted(matching, key=lambda p: p.stat().st_mtime, reverse=True)[0]
     print(f"[Analyzer] Читаю: {latest.name}")
 
     try:
@@ -444,6 +579,7 @@ def analyzer_parse_result(hyp_id: str, worker_output: dict[str, Any]) -> dict[st
     except Exception as e:
         return {"metric_value": None, "note": f"JSON parse error: {e}"}
 
+    data = _augment_probe_payload(data, latest.name)
     metric_value = _nested_get(data, result_key) if result_key else None
 
     # Собираем краткий summary
@@ -634,6 +770,7 @@ def run_loop(
         elif use_llm_strategist:
             llm_proposal = strategist_llm_select(state, playbook)
             if llm_proposal:
+                llm_proposal = _apply_script_runtime_defaults(llm_proposal)
                 hyp_id = llm_proposal["id"]
                 # Регистрируем динамически в EXPERIMENT_REGISTRY
                 script_name = llm_proposal.get("script", f"run_qwen_llm_{hyp_id}.py")
@@ -649,7 +786,7 @@ def run_loop(
                     "phase": state["current_phase"],
                     "script": script_name,
                     "default_args": llm_proposal.get("args", {}),
-                    "output_pattern": "archive/*.json",
+                    "output_pattern": llm_proposal.get("output_pattern", "archive/*.json"),
                     "result_key": llm_proposal.get("result_key"),
                     "success_threshold": llm_proposal.get("success_threshold"),
                     "depends_on": [],
@@ -691,6 +828,27 @@ def run_loop(
             })
             state["budget_remaining"] = max(0, state["budget_remaining"] - 1)
             save_state(state)
+            continue
+
+        if worker_output["status"] != "success":
+            print(f"\n[Analyzer] Пропускаю парсинг результата: worker status = {worker_output['status']}")
+            analysis = {
+                "metric_value": None,
+                "note": worker_output.get("stderr_tail") or worker_output.get("error") or worker_output["status"],
+            }
+            analyzer_update_state(hyp_id, analysis, worker_output, state)
+            log_event({
+                "event": "experiment_done",
+                "hypothesis": hyp_id,
+                "status": analysis,
+                "metric": analysis.get("metric_value"),
+            })
+            save_state(state)
+            if state["budget_remaining"] <= 0:
+                print("\n[Orchestrator] Бюджет исчерпан.")
+                break
+            print(f"\n[Orchestrator] Пауза 3с перед следующим экспериментом...")
+            time.sleep(3)
             continue
 
         # Analyzer разбирает результат
