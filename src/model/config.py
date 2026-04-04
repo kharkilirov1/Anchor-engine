@@ -155,6 +155,22 @@ CONFIG_150M_V16_BASELINE = ModelConfig(
     use_verifier=False, use_plastic=False,
 )
 
+CONFIG_50M = ModelConfig(
+    vocab_size=16000, d_model=640, n_heads=10,
+    n_layers=10, d_ff=2560, max_seq_len=256,
+    batch_size=4, plastic_hidden=64,
+    use_attn_res=True, use_branches=True,
+    use_verifier=True, use_plastic=True,
+)
+
+CONFIG_50M_BASELINE = ModelConfig(
+    vocab_size=16000, d_model=640, n_heads=10,
+    n_layers=10, d_ff=2560, max_seq_len=256,
+    batch_size=4, plastic_hidden=64,
+    use_attn_res=False, use_branches=False,
+    use_verifier=False, use_plastic=False,
+)
+
 PRESETS = {
     "baseline-0": BASELINE_0,
     "baseline-1-attnres": BASELINE_1_ATTNRES,
@@ -167,4 +183,6 @@ PRESETS = {
     "150m-baseline": CONFIG_150M_BASELINE,
     "150m-v16": CONFIG_150M_V16,
     "150m-v16-baseline": CONFIG_150M_V16_BASELINE,
+    "50m": CONFIG_50M,
+    "50m-baseline": CONFIG_50M_BASELINE,
 }
