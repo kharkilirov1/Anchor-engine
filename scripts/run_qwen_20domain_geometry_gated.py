@@ -151,6 +151,7 @@ def probe_geometry(
         "delta_template_pair": delta_template,
         "mature_layer": mature_layer,
         "anchor_text": domain.anchor_text,
+        "match_method": span_match.match_method,
         "token_start": span_match.token_start,
         "token_end": span_match.token_end,
         "token_count": span_match.token_count,
@@ -363,7 +364,8 @@ def main() -> None:
         route = geo.get("route", "?")
         r1 = geo.get("r1_reference")
         r1_s = f"{r1:.3f}" if r1 is not None else "N/A"
-        print(f"  {domain.name:<35} cluster={cluster:<10} r1={r1_s:<8} route={route}")
+        method = geo.get("match_method", geo.get("reason", "?"))
+        print(f"  {domain.name:<35} cluster={cluster:<10} r1={r1_s:<8} route={route:<8} match={method}")
 
     n_flat = sum(1 for g in geometries if g.get("cluster") == "flat")
     n_mature = sum(1 for g in geometries if g.get("cluster") == "mature")
