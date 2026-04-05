@@ -114,8 +114,8 @@ def probe_geometry(
         span_match = detect_anchor_span(
             attentions,
             probe_layers,
-            min_width=2,
-            max_width=8,
+            min_width=5,
+            max_width=10,
         )
 
     # Fallback: text-based matching (for models without attention output)
@@ -138,9 +138,9 @@ def probe_geometry(
             "reason": "no_anchor_detected",
         }
 
-    # Ensure span is wide enough for meaningful geometry (need ≥3 tokens for r1)
+    # Ensure span is wide enough for meaningful geometry (need ≥4 tokens for r1)
     seq_len = len(input_ids)
-    MIN_GEOMETRY_TOKENS = 3
+    MIN_GEOMETRY_TOKENS = 5
     if span_match.token_count < MIN_GEOMETRY_TOKENS:
         center = (span_match.token_start + span_match.token_end) // 2
         half = MIN_GEOMETRY_TOKENS // 2

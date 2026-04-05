@@ -329,41 +329,57 @@ def match_anchor_span(
 
 def detect_anchor_span(
     attentions: tuple[torch.Tensor, ...],
-    probe_layers: list[int],
+    probe_layers: list[int] | None = None,
     *,
     min_width: int = 2,
     max_width: int = 8,
     skip_special: int = 1,
+    use_last_n: int = 4,
 ) -> AnchorSpanMatch | None:
     """Detect anchor span via attention mass from the last token.
 
-    For each mature layer, sum attention the last token pays to each
-    preceding position (averaged across heads).  The contiguous span
-    with highest cumulative score is the anchor.
+    For each available mature attention layer, sum attention the last
+    token pays to each preceding position (averaged across heads).
+    The contiguous span with highest cumulative score is the anchor.
 
     Args:
         attentions: tuple of [batch, heads, seq, seq] from model output.
-        probe_layers: layer indices to aggregate (use mature layers).
+            May be a subset of all layers (e.g. 8 out of 32).
+        probe_layers: layer indices to try. If the tuple is shorter than
+            expected, falls back to the last ``use_last_n`` available entries.
         min_width: minimum span width in tokens.
         max_width: maximum span width in tokens.
         skip_special: skip first N tokens (BOS / special).
+        use_last_n: how many of the *last* available attention entries to
+            aggregate when probe_layers don't map into the tuple.
 
     Returns:
         AnchorSpanMatch with detected span, or None if input is too short.
     """
-    if not attentions or not probe_layers:
+    if not attentions:
         return None
 
     seq_len = attentions[0].size(-1)
     if seq_len < skip_special + min_width + 1:
         return None
 
+    n_attn = len(attentions)
+
+    # Build list of actual attention indices to use
+    attn_indices: list[int] = []
+    if probe_layers:
+        for layer_idx in probe_layers:
+            attn_idx = layer_idx + 1
+            if 0 <= attn_idx < n_attn:
+                attn_indices.append(attn_idx)
+    # Fallback: use last N available attention entries
+    if not attn_indices:
+        start = max(0, n_attn - use_last_n)
+        attn_indices = list(range(start, n_attn))
+
     score = torch.zeros(seq_len)
     n_layers_used = 0
-    for layer_idx in probe_layers:
-        attn_idx = layer_idx + 1  # attentions[0] = layer 0
-        if attn_idx >= len(attentions):
-            continue
+    for attn_idx in attn_indices:
         attn = attentions[attn_idx][0]  # [heads, seq, seq]
         # Attention from last token to all previous
         last_attn = attn[:, -1, :].mean(dim=0).detach().cpu()  # [seq]
