@@ -316,7 +316,7 @@ def build_summary(results: list[dict[str, Any]], model_name: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="20-domain retention campaign")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen3.5-4B")
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--max_new_tokens", type=int, default=500)
     parser.add_argument("--max_length", type=int, default=1024)
