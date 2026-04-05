@@ -237,6 +237,66 @@ def _match_from_token_ids(
     )
 
 
+def _match_from_decoded_pieces(
+    *,
+    anchor_text: str,
+    input_ids: list[int],
+    tokenizer: Any,
+) -> AnchorSpanMatch | None:
+    """Fallback: decode each token individually, build char→token map, search."""
+    pieces = decode_token_pieces(tokenizer, input_ids)
+    if not pieces:
+        return None
+
+    # Build cumulative decoded string with token boundary tracking
+    char_to_token: list[int] = []
+    decoded_full = ""
+    for tok_idx, piece in enumerate(pieces):
+        for _ in piece:
+            char_to_token.append(tok_idx)
+        decoded_full += piece
+
+    if not decoded_full:
+        return None
+
+    # Search for anchor_text (case-insensitive to handle tokenizer quirks)
+    needle = anchor_text.lower()
+    haystack = decoded_full.lower()
+    matches: list[int] = []
+    start_pos = 0
+    while True:
+        pos = haystack.find(needle, start_pos)
+        if pos == -1:
+            break
+        matches.append(pos)
+        start_pos = pos + 1
+
+    if len(matches) != 1:
+        return None
+
+    char_start = matches[0]
+    char_end = char_start + len(needle)
+
+    # Map character positions to token indices
+    if char_start >= len(char_to_token) or char_end - 1 >= len(char_to_token):
+        return None
+
+    token_start = char_to_token[char_start]
+    token_end = char_to_token[min(char_end - 1, len(char_to_token) - 1)]
+
+    matched_text = decoded_full[char_start:char_end]
+    return AnchorSpanMatch(
+        anchor_text=anchor_text,
+        token_start=token_start,
+        token_end=token_end,
+        token_count=token_end - token_start + 1,
+        char_start=None,
+        char_end=None,
+        match_method="decoded_pieces",
+        matched_text=matched_text,
+    )
+
+
 def match_anchor_span(
     *,
     text: str,
@@ -253,7 +313,14 @@ def match_anchor_span(
         )
         if match is not None:
             return match
-    return _match_from_token_ids(
+    match = _match_from_token_ids(
+        anchor_text=anchor_text,
+        input_ids=input_ids,
+        tokenizer=tokenizer,
+    )
+    if match is not None:
+        return match
+    return _match_from_decoded_pieces(
         anchor_text=anchor_text,
         input_ids=input_ids,
         tokenizer=tokenizer,
