@@ -19,6 +19,7 @@ class RetentionDomain:
     positive_keywords: tuple[str, ...]
     negative_keywords: tuple[str, ...]
     bias_profile_name: str
+    anchor_text: str = ""  # span in prompt for geometry probe
     max_new_tokens: int = 500
 
 
@@ -41,6 +42,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "butter", "milk", "cream", "yogurt", "sausage", "ham",
         ),
         bias_profile_name="vegan",
+        anchor_text="vegan chef",
     ),
     # ── 2. FastAPI (existing, baseline) ─────────────────────────────
     RetentionDomain(
@@ -61,6 +63,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "render", "make_response", "wsgi",
         ),
         bias_profile_name="code",
+        anchor_text="async FastAPI service",
     ),
     # ── 3. Proof by contradiction (existing, baseline) ──────────────
     RetentionDomain(
@@ -77,6 +80,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "theory", "algebraic", "polynomial", "field", "complex",
         ),
         bias_profile_name="math",
+        anchor_text="proof by contradiction",
     ),
     # ── 4. Gluten-free bakery ───────────────────────────────────────
     RetentionDomain(
@@ -96,6 +100,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "barley", "rye", "semolina", "spelt", "durum",
         ),
         bias_profile_name="dietary",
+        anchor_text="gluten-free flours",
     ),
     # ── 5. Rust without unsafe ──────────────────────────────────────
     RetentionDomain(
@@ -114,6 +119,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "union", "asm!",
         ),
         bias_profile_name="code_strict",
+        anchor_text="safe Rust",
     ),
     # ── 6. GDPR compliance ──────────────────────────────────────────
     RetentionDomain(
@@ -134,6 +140,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "share without consent", "no expiration", "unlimited retention",
         ),
         bias_profile_name="legal",
+        anchor_text="GDPR-compliant",
     ),
     # ── 7. Metric units only ────────────────────────────────────────
     RetentionDomain(
@@ -155,6 +162,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "yard", "yards", "mile", "miles",
         ),
         bias_profile_name="constraint",
+        anchor_text="metric units",
     ),
     # ── 8. Halal cuisine ────────────────────────────────────────────
     RetentionDomain(
@@ -174,6 +182,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "alcohol", "rum", "vodka", "gelatin", "lard",
         ),
         bias_profile_name="dietary",
+        anchor_text="halal chef",
     ),
     # ── 9. PostgreSQL without ORM ───────────────────────────────────
     RetentionDomain(
@@ -194,6 +203,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "model.objects", "declarative_base", "mapped_column",
         ),
         bias_profile_name="code_strict",
+        anchor_text="raw PostgreSQL queries",
     ),
     # ── 10. Renewable energy only ───────────────────────────────────
     RetentionDomain(
@@ -214,6 +224,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "uranium", "diesel", "gasoline", "petroleum", "fracking",
         ),
         bias_profile_name="constraint",
+        anchor_text="renewable energy sources",
     ),
     # ── 11. TypeScript strict mode ──────────────────────────────────
     RetentionDomain(
@@ -234,6 +245,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "object", ": Object",
         ),
         bias_profile_name="code_strict",
+        anchor_text="strict null checks",
     ),
     # ── 12. Functional programming (no mutation) ────────────────────
     RetentionDomain(
@@ -253,6 +265,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             ".sort(", ".pop(", "del ", ".update(",
         ),
         bias_profile_name="code_strict",
+        anchor_text="pure functions",
     ),
     # ── 13. Formal academic tone ────────────────────────────────────
     RetentionDomain(
@@ -274,6 +287,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "doesn't", "shouldn't",
         ),
         bias_profile_name="constraint",
+        anchor_text="formal academic language",
     ),
     # ── 14. Zero-waste lifestyle ────────────────────────────────────
     RetentionDomain(
@@ -294,6 +308,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "styrofoam", "paper plate", "paper cup", "throw away",
         ),
         bias_profile_name="constraint",
+        anchor_text="zero-waste living",
     ),
     # ── 15. Kubernetes (no Docker Compose) ──────────────────────────
     RetentionDomain(
@@ -314,6 +329,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "docker-compose.yml", "compose.yml", "swarm",
         ),
         bias_profile_name="code",
+        anchor_text="Kubernetes",
     ),
     # ── 16. Organic farming ─────────────────────────────────────────
     RetentionDomain(
@@ -334,6 +350,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "gmo", "roundup", "glyphosate", "insecticide",
         ),
         bias_profile_name="constraint",
+        anchor_text="certified organic",
     ),
     # ── 17. Medical: drug-free pain management ──────────────────────
     RetentionDomain(
@@ -356,6 +373,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "codeine", "tramadol", "nsaid",
         ),
         bias_profile_name="medical",
+        anchor_text="non-pharmacological approaches",
     ),
     # ── 18. Budget travel (no luxury) ───────────────────────────────
     RetentionDomain(
@@ -377,6 +395,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "limousine", "premium",
         ),
         bias_profile_name="constraint",
+        anchor_text="strict budget",
     ),
     # ── 19. Python type-safe (no dynamic typing) ────────────────────
     RetentionDomain(
@@ -395,6 +414,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "**kwargs", "untyped", "dict()", "= {}", ": dict,",
         ),
         bias_profile_name="code",
+        anchor_text="dataclasses and type hints",
     ),
     # ── 20. Minimalist UI design ────────────────────────────────────
     RetentionDomain(
@@ -415,6 +435,7 @@ RETENTION_DOMAINS: tuple[RetentionDomain, ...] = (
             "neon", "glitter", "skeuomorphic", "ornament",
         ),
         bias_profile_name="constraint",
+        anchor_text="minimalist web application",
     ),
 )
 
