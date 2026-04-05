@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -264,7 +264,7 @@ def build_summary(results: list[dict[str, Any]], model_name: str) -> str:
     lines = [
         "# 20-Domain Retention Campaign Results",
         "",
-        f"Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         f"Model: `{model_name}`",
         f"Domains tested: {len(results)}",
         "",
@@ -418,10 +418,10 @@ def main() -> None:
 
     # Save results
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     payload = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "model": args.model,
         "device": args.device,
         "seed": args.seed,

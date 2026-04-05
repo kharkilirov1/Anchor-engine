@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,7 +52,7 @@ def run_cpu_large_campaign() -> Path:
     os.environ["ALLOW_CPU_SPACE"] = "1"
     from scripts.remote_worker import remote_worker_run
 
-    started_at = datetime.now(UTC).isoformat()
+    started_at = datetime.now(timezone.utc).isoformat()
     runs: list[dict[str, Any]] = []
     for spec in RUN_MATRIX:
         print(
@@ -83,7 +83,7 @@ def run_cpu_large_campaign() -> Path:
         )
         time.sleep(3)
 
-    finished_at = datetime.now(UTC).isoformat()
+    finished_at = datetime.now(timezone.utc).isoformat()
     report = {
         "campaign": "cpu_large_campaign",
         "model": "Qwen/Qwen3.5-4B",
@@ -91,7 +91,7 @@ def run_cpu_large_campaign() -> Path:
         "finished_at": finished_at,
         "runs": runs,
     }
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     out_path = ARCHIVE_DIR / f"cpu_large_campaign_{ts}.json"
     out_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"[CPULargeCampaign] saved_json={out_path}")

@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,7 @@ def run_cpu_night_campaign() -> Path:
     from scripts.remote_worker import remote_worker_run
 
     profiles = ["short", "medium", "long"]
-    started_at = datetime.now(UTC).isoformat()
+    started_at = datetime.now(timezone.utc).isoformat()
     runs: list[dict[str, Any]] = []
     for profile in profiles:
         print(f"[CPUCampaign] profile={profile}")
@@ -76,7 +76,7 @@ def run_cpu_night_campaign() -> Path:
         )
         time.sleep(3)
 
-    finished_at = datetime.now(UTC).isoformat()
+    finished_at = datetime.now(timezone.utc).isoformat()
     report = {
         "campaign": "cpu_night_campaign",
         "model": "Qwen/Qwen3.5-4B",
@@ -84,7 +84,7 @@ def run_cpu_night_campaign() -> Path:
         "finished_at": finished_at,
         "runs": runs,
     }
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     out_path = ARCHIVE_DIR / f"cpu_night_campaign_{ts}.json"
     out_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"[CPUCampaign] saved_json={out_path}")

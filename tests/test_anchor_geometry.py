@@ -8,6 +8,7 @@ from src.utils.anchor_geometry import (
     compute_geometry_metrics,
     decode_token_pieces,
     decode_token_surfaces,
+    detect_anchor_span,
     list_model_layers,
     match_anchor_span,
     select_representative_layers,
@@ -167,3 +168,40 @@ def test_compute_cross_prompt_stability_reports_pairwise_cosines() -> None:
     assert stability["pair_count"] == 3
     assert stability["mean_pairwise_cosine"] is not None
     assert stability["mean_pairwise_cosine"] > 0.9
+
+
+def test_detect_anchor_span_finds_high_attention_region() -> None:
+    """Attention concentrated on tokens 3-4 should be detected as anchor."""
+    seq_len = 10
+    n_heads = 2
+    n_layers = 4
+
+    attentions: list[torch.Tensor] = []
+    for layer in range(n_layers + 1):
+        attn = torch.zeros(1, n_heads, seq_len, seq_len)
+        # Last token attends uniformly
+        attn[:, :, -1, :] = 1.0 / seq_len
+        # Spike attention on tokens 3-4 in later layers
+        if layer >= 3:
+            attn[:, :, -1, :] = 0.01
+            attn[:, :, -1, 3] = 0.45
+            attn[:, :, -1, 4] = 0.45
+        attentions.append(attn)
+
+    probe_layers = [2, 3]  # attentions index = layer + 1
+    result = detect_anchor_span(tuple(attentions), probe_layers)
+    assert result is not None
+    assert result.match_method == "attention_mass"
+    assert result.token_start <= 3
+    assert result.token_end >= 4
+
+
+def test_detect_anchor_span_returns_none_for_short_sequence() -> None:
+    attn = torch.zeros(1, 2, 3, 3)
+    result = detect_anchor_span((attn,), [0], min_width=2, skip_special=1)
+    assert result is None
+
+
+def test_detect_anchor_span_returns_none_for_empty_inputs() -> None:
+    assert detect_anchor_span((), []) is None
+    assert detect_anchor_span((), [0, 1]) is None

@@ -94,7 +94,7 @@ def _normalize_text(text: str) -> str:
 
 def _find_unique_substring(text: str, anchor_text: str) -> tuple[int, int] | None:
     matches = list(re.finditer(re.escape(anchor_text), text))
-    if len(matches) != 1:
+    if not matches:
         return None
     match = matches[0]
     return match.start(), match.end()
@@ -221,7 +221,7 @@ def _match_from_token_ids(
             phrase_seq = [int(token) for token in phrase_ids]
         for match in _search_subsequence(input_ids, phrase_seq):
             candidate_matches[match] = label
-    if len(candidate_matches) != 1:
+    if not candidate_matches:
         return None
     (token_start, token_end), label = next(iter(candidate_matches.items()))
     matched_text = _decode_anchor_tokens(tokenizer, input_ids[token_start : token_end + 1])
@@ -271,7 +271,7 @@ def _match_from_decoded_pieces(
         matches.append(pos)
         start_pos = pos + 1
 
-    if len(matches) != 1:
+    if not matches:
         return None
 
     char_start = matches[0]
@@ -324,6 +324,90 @@ def match_anchor_span(
         anchor_text=anchor_text,
         input_ids=input_ids,
         tokenizer=tokenizer,
+    )
+
+
+def detect_anchor_span(
+    attentions: tuple[torch.Tensor, ...],
+    probe_layers: list[int],
+    *,
+    min_width: int = 2,
+    max_width: int = 8,
+    skip_special: int = 1,
+) -> AnchorSpanMatch | None:
+    """Detect anchor span via attention mass from the last token.
+
+    For each mature layer, sum attention the last token pays to each
+    preceding position (averaged across heads).  The contiguous span
+    with highest cumulative score is the anchor.
+
+    Args:
+        attentions: tuple of [batch, heads, seq, seq] from model output.
+        probe_layers: layer indices to aggregate (use mature layers).
+        min_width: minimum span width in tokens.
+        max_width: maximum span width in tokens.
+        skip_special: skip first N tokens (BOS / special).
+
+    Returns:
+        AnchorSpanMatch with detected span, or None if input is too short.
+    """
+    if not attentions or not probe_layers:
+        return None
+
+    seq_len = attentions[0].size(-1)
+    if seq_len < skip_special + min_width + 1:
+        return None
+
+    score = torch.zeros(seq_len)
+    n_layers_used = 0
+    for layer_idx in probe_layers:
+        attn_idx = layer_idx + 1  # attentions[0] = layer 0
+        if attn_idx >= len(attentions):
+            continue
+        attn = attentions[attn_idx][0]  # [heads, seq, seq]
+        # Attention from last token to all previous
+        last_attn = attn[:, -1, :].mean(dim=0).detach().cpu()  # [seq]
+        score += last_attn
+        n_layers_used += 1
+
+    if n_layers_used == 0:
+        return None
+
+    score /= n_layers_used
+
+    # Zero out special tokens and the last token itself
+    score[:skip_special] = 0.0
+    score[-1] = 0.0
+
+    # Sliding window: find the contiguous span with highest total attention
+    best_score = -1.0
+    best_start = skip_special
+    best_end = skip_special + min_width - 1
+
+    upper_width = min(max_width, seq_len - skip_special - 1)
+    for width in range(min_width, upper_width + 1):
+        if width > seq_len:
+            break
+        windows = score[skip_special : seq_len - 1].unfold(0, width, 1)
+        if windows.numel() == 0:
+            continue
+        sums = windows.sum(dim=-1)
+        idx = int(sums.argmax().item())
+        val = float(sums[idx].item())
+        if val > best_score:
+            best_score = val
+            best_start = skip_special + idx
+            best_end = best_start + width - 1
+
+    return AnchorSpanMatch(
+        anchor_text="",
+        token_start=best_start,
+        token_end=best_end,
+        token_count=best_end - best_start + 1,
+        char_start=None,
+        char_end=None,
+        match_method="attention_mass",
+        matched_text="",
     )
 
 

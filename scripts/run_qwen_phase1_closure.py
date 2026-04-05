@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -179,7 +179,7 @@ def run(model_name: str, device_str: str) -> None:
             "profiles_tested": list(ANCHOR_SPAN_PROFILES),
             "success_threshold": SUCCESS_THRESHOLD,
             "seed": SEED,
-            "created_at_utc": datetime.now(UTC).isoformat(),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
         },
         "verdict": phase1_verdict,
         "comparison": comparison,

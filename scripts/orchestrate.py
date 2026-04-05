@@ -33,7 +33,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -105,7 +105,7 @@ def save_state(state: dict[str, Any]) -> None:
 
 
 def log_event(event: dict[str, Any]) -> None:
-    event["timestamp"] = datetime.now(UTC).isoformat()
+    event["timestamp"] = datetime.now(timezone.utc).isoformat()
     with LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
@@ -885,7 +885,7 @@ def analyzer_update_playbook(hyp_id: str, analysis: dict[str, Any], state: dict[
     else:
         verdict = "📊 DATA COLLECTED"
 
-    timestamp = datetime.now(UTC).strftime("%Y-%m-%d")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     new_entry = f"""
 ---
@@ -938,7 +938,7 @@ def analyzer_update_state(
         "metric_value": metric_val,
         "elapsed_seconds": worker_output.get("elapsed_seconds"),
         "output_file": analysis.get("output_file"),
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     phase_key = str(hyp_def["phase"])
@@ -956,13 +956,13 @@ def analyzer_update_state(
         "experiment": hyp_id,
         "metric": hyp_def.get("result_key"),
         "value": metric_val,
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
     # Уменьшить бюджет
     state["budget_remaining"] = max(0, state["budget_remaining"] - 1)
     state["experiments_run"] = state.get("experiments_run", 0) + 1
-    state["last_updated"] = datetime.now(UTC).strftime("%Y-%m-%d")
+    state["last_updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # Если фаза 1 успешно завершена — разблокировать фазы 2 и 3
     phase1_exps = state["phases"].get("1", {}).get("experiments", [])
@@ -1126,7 +1126,7 @@ def run_loop(
             # Помечаем как skipped и продолжаем
             state.setdefault("phases", {}).setdefault(str(hyp_def["phase"]), {}).setdefault("experiments", []).append({
                 "hypothesis_id": hyp_id, "status": "skipped",
-                "timestamp": datetime.now(UTC).isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             })
             state["budget_remaining"] = max(0, state["budget_remaining"] - 1)
             save_state(state)

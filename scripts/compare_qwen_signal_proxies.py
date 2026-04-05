@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -100,7 +100,7 @@ def build_markdown_report(
     lines = [
         "# Qwen Signal Proxy Comparison",
         "",
-        f"Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         f"Anchor probe source: `{anchor_payload['model']}`",
         f"Future-influence source: `{future_payload['model']}`",
         "",

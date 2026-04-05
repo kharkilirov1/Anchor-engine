@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys

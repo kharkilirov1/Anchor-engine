@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -165,7 +165,7 @@ def build_markdown_report(
     lines = [
         "# Qwen Branch-Aware Tree Rerank Compare",
         "",
-        f"Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         f"Model: `{model_name}`",
         f"Device: `{device}`",
         f"Max length: `{max_length}`",
@@ -288,7 +288,7 @@ def main() -> None:
 
     summary = summarize_results(results)
     payload = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "model": args.model,
         "device": args.device,
         "max_length": args.max_length,

@@ -22,7 +22,7 @@ import argparse
 import json
 import sys
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -403,7 +403,7 @@ def run(
             "mature_r1_threshold": mature_threshold,
             "template_delta_threshold": template_threshold,
             "seed": SEED,
-            "created_at_utc": datetime.now(UTC).isoformat(),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
         },
         "cluster_summary": summary,
         "correlation": {

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -104,7 +104,7 @@ def build_markdown_report(analysis: dict[str, Any]) -> str:
     lines = [
         "# Qwen Span Miss Analysis",
         "",
-        f"Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         "",
         "## Summary",
         "",

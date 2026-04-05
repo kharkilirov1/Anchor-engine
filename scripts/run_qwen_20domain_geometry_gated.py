@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -34,6 +34,7 @@ from src.utils.anchor_geometry import (
     AnchorSpanMatch,
     build_tail_reference_layers,
     compute_geometry_metrics,
+    detect_anchor_span,
     extract_delta_vectors,
     match_anchor_span,
     select_tail_probe_layers,
@@ -56,13 +57,15 @@ def probe_geometry(
     mature_r1_threshold: float = 0.65,
     template_delta_threshold: float = 0.08,
 ) -> dict[str, Any]:
-    """Run geometry probe on domain's anchor span, return cluster classification."""
+    """Run geometry probe using attention-based anchor detection.
+
+    Flow: forward pass (with attentions) → detect anchor span from
+    attention mass → extract geometry at detected span.
+    Falls back to text-based match_anchor_span if attentions unavailable.
+    """
     tokenizer = overlay.tokenizer
     if tokenizer is None:
         return {"matched": False, "cluster": "unknown", "reason": "no_tokenizer"}
-
-    if not domain.anchor_text:
-        return {"matched": False, "cluster": "unknown", "reason": "no_anchor_text"}
 
     device = next(overlay.parameters()).device
 
@@ -75,40 +78,64 @@ def probe_geometry(
         return_offsets_mapping=True,
     )
     input_ids = encoded["input_ids"][0].tolist()
-    offsets = None
-    if "offset_mapping" in encoded:
-        offsets = [tuple(pair) for pair in encoded["offset_mapping"][0].tolist()]
 
-    # Match anchor span in tokens
-    span_match = match_anchor_span(
-        text=domain.prompt,
-        anchor_text=domain.anchor_text,
-        input_ids=input_ids,
-        tokenizer=tokenizer,
-        offsets=offsets,
-    )
-    if span_match is None:
-        return {
-            "matched": False,
-            "cluster": "unknown",
-            "reason": f"span_not_matched: '{domain.anchor_text}'",
-        }
-
-    # Run forward pass to get hidden states
+    # Forward pass FIRST — need attentions for anchor detection
     input_tensor = encoded["input_ids"].to(device)
     with torch.no_grad():
         outputs = overlay.base_model(
             input_ids=input_tensor,
             output_hidden_states=True,
+            output_attentions=True,
             return_dict=True,
         )
 
-    hidden_states = outputs.hidden_states  # tuple of (n_layers+1) tensors
+    hidden_states = outputs.hidden_states
+    attentions = getattr(outputs, "attentions", None)
+
+    # Primary: attention-based anchor detection
+    span_match = None
+    if attentions is not None:
+        span_match = detect_anchor_span(
+            attentions,
+            probe_layers,
+            min_width=2,
+            max_width=8,
+        )
+
+    # Fallback: text-based matching (for models without attention output)
+    if span_match is None and domain.anchor_text:
+        offsets = None
+        if "offset_mapping" in encoded:
+            offsets = [tuple(pair) for pair in encoded["offset_mapping"][0].tolist()]
+        span_match = match_anchor_span(
+            text=domain.prompt,
+            anchor_text=domain.anchor_text,
+            input_ids=input_ids,
+            tokenizer=tokenizer,
+            offsets=offsets,
+        )
+
+    if span_match is None:
+        return {
+            "matched": False,
+            "cluster": "unknown",
+            "reason": "no_anchor_detected",
+        }
+
+    # Decode detected span for logging
+    detected_text = ""
+    try:
+        detected_text = tokenizer.decode(
+            input_ids[span_match.token_start : span_match.token_end + 1],
+            skip_special_tokens=True,
+        )
+    except Exception:
+        pass
 
     # Extract r1 profile across probe layers
     r1_profile: dict[str, float | None] = {}
     for layer_idx in probe_layers:
-        hs_idx = layer_idx + 1  # hidden_states[0] = embeddings
+        hs_idx = layer_idx + 1
         if hs_idx >= len(hidden_states):
             r1_profile[str(layer_idx)] = None
             continue
@@ -135,13 +162,13 @@ def probe_geometry(
 
     if r1_ref is not None and r1_ref > mature_r1_threshold:
         cluster = "mature"
-        route = "base"  # model can handle it
+        route = "base"
     elif delta_template is not None and delta_template > template_delta_threshold:
         cluster = "template"
-        route = "base"  # model knows the pattern
+        route = "base"
     else:
         cluster = "flat"
-        route = "anchor"  # model needs help
+        route = "anchor"
 
     return {
         "matched": True,
@@ -151,6 +178,7 @@ def probe_geometry(
         "delta_template_pair": delta_template,
         "mature_layer": mature_layer,
         "anchor_text": domain.anchor_text,
+        "detected_text": detected_text,
         "match_method": span_match.match_method,
         "token_start": span_match.token_start,
         "token_end": span_match.token_end,
@@ -429,10 +457,10 @@ def main() -> None:
 
     # Save
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     payload = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "model": args.model,
         "device": args.device,
         "seed": args.seed,
@@ -466,7 +494,7 @@ def main() -> None:
     lines = [
         "# Geometry-Gated 20-Domain Campaign",
         "",
-        f"Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         f"Model: `{args.model}`",
         f"Thresholds: mature_r1>{args.mature_r1_threshold}, "
         f"template_delta>{args.template_delta_threshold}",

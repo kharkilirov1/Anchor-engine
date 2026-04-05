@@ -28,7 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -357,7 +357,7 @@ def run(model_name: str, device_str: str) -> None:
             "model_name": model_name,
             "n_layers": n_layers,
             "seed": SEED,
-            "created_at_utc": datetime.now(UTC).isoformat(),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
         },
         "hypotheses": {
             "H5a_carryover_in_handoff": {
