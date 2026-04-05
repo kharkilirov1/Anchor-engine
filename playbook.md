@@ -114,8 +114,32 @@ Carryover = косинусное сходство между hidden state суф
 
 ---
 
-*Последнее обновление: 2026-04-04 (ручное)*
-*Следующее обновление: автоматически после Фазы 1 phase_probe*
+## 20-Domain Geometry-Gated Campaign (2026-04-05)
+
+### Результаты (hardcoded thresholds, attention-based spans)
+- 20 доменов, Qwen/Qwen3.5-4B, GPU T4
+- r1 range: 0.199–0.340 — **ни одного mature** кластера при пороге 0.65
+- С hardcoded: flat=17, template=3 → anchor wins 4/17, losses 13/17
+- С auto-calibrated (k-means): flat=7, mature=9, template=4 → прогон в процессе
+
+### Ключевой вывод
+- Binary gating (apply/skip anchor) — **неэффективен** для 4B модели
+- r1 одинаков у winners и losers → геометрия одного слоя не разделяет их
+- **base_quality** — реальный предиктор: anchor помогает когда base<0, вредит когда base>0
+
+### H6 — Continuous Guardrail Hypothesis (untested)
+**Гипотеза:** 4B модели кристаллизуют constraints слишком поздно/слабо для binary gating. Anchor engine должен работать как **continuous-strength anti-drift guardrail**:
+- `bias_scale = max(0, 1 - r1/r1_ceiling)` — непрерывная сила вместо on/off
+- Низкий r1 → сильный bias (модель не удерживает constraint)
+- Высокий r1 → слабый bias (модель справляется)
+- При длинном контексте — постоянное мягкое давление против hallucination drift
+
+**Обоснование:** fastapi (base=-6.0, WIN+27.2) и typescript (base=+34.2, LOSS-22.3) имеют одинаковый r1≈0.24, но противоположный результат. Бинарный gate не может их разделить. Continuous bias при правильной калибровке даст слабый bias для typescript (не сломает) и тот же bias для fastapi (спасёт).
+
+---
+
+*Последнее обновление: 2026-04-06*
+*Следующий шаг: прогон с auto-calibrated thresholds, затем тест H6 continuous bias*
 
 ---
 ## [2026-04-04] Эксперимент H1_cross_profile_v2: Retry cross-profile tail_retention_ratio validation across short/medium/long profiles in a single run. All 8 prior experiments returned null metrics due to infrastructure/extraction failures, not hypothesis rejection. This is the highest-value experiment: confirms or denies generalization of the strongest known signal (rho=0.64 on medium) with one run covering all 3 profiles.

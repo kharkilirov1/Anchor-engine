@@ -2143,6 +2143,16 @@
       "phase": 1,
       "script": "run_qwen_phase_probe.py",
       "status": "untested"
+    },
+    {
+      "id": "H6",
+      "statement": "4B models crystallize constraints too late/weakly for binary gating; anchor should be continuous-strength guardrail (bias_scale proportional to 1-r1) rather than on/off switch, functioning as anti-hallucination drift prevention in long-context generation",
+      "phase": 4,
+      "script": null,
+      "status": "untested",
+      "evidence_for": "20-domain campaign: all r1 in 0.19-0.34 (no mature clusters), anchor wins only when base_q<0 (model already failing), anchor hurts when base_q>0 (model fine but anchor adds noise). Binary gate loses 13/17. Geometry cannot separate winners from losers by r1 alone — base quality is the true predictor.",
+      "proposed_mechanism": "Replace binary flat/mature/template classification with continuous bias_scale = max(0, 1 - r1/r1_ceiling). Low r1 → strong bias (guardrail). High r1 → weak/no bias. This avoids both over-intervention (breaking good base) and under-intervention (missing struggling base).",
+      "depends_on": "H1,H4"
     }
   ],
   "disproven_hypotheses": [
