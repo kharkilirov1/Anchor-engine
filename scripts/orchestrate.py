@@ -16,11 +16,13 @@ ABPT Orchestrator — Autonomous Research Loop
   !python scripts/orchestrate.py --phase 1        # только фаза 1
   !python scripts/orchestrate.py --dry-run        # показать план без запуска
   !python scripts/orchestrate.py --experiment H1  # запустить конкретную гипотезу
+  !python scripts/orchestrate.py --local-strategist  # использовать локального агента
 
 Переменные окружения:
-  OPENAI_API_KEY   — для LLM-assisted Strategist (опционально)
-  ANTHROPIC_API_KEY — для LLM-assisted Strategist (опционально)
-  Без API ключа: rule-based Strategist (работает автономно)
+  OPENAI_API_KEY      — для LLM-assisted Strategist (опционально)
+  ANTHROPIC_API_KEY   — для LLM-assisted Strategist (опционально)
+  USE_LOCAL_STRATEGIST=1 — использовать локального агента вместо API
+  LOCAL_STRATEGIST_MODE=interactive|auto — режим локального стратега
 """
 from __future__ import annotations
 
@@ -43,6 +45,40 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Local Strategist Integration
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_local_strategist() -> Any | None:
+    """Lazy import локального стратега если USE_LOCAL_STRATEGIST установлен."""
+    if os.environ.get("USE_LOCAL_STRATEGIST"):
+        try:
+            from scripts.local_strategist import strategist_local_select
+            return strategist_local_select
+        except ImportError as e:
+            print(f"[Orchestrator] Предупреждение: USE_LOCAL_STRATEGIST установлен, "
+                  f"но local_strategist.py не найден: {e}")
+    return None
+
+
+LOCAL_STRATEGIST = _get_local_strategist()
+
+
+def _get_remote_worker():
+    """Lazy import remote worker если WORKER_URL установлен."""
+    remote_repo = ROOT.parent / "hf_abpt_space"
+    if os.environ.get("WORKER_URL") or remote_repo.exists():
+        try:
+            from scripts.remote_worker import remote_worker_run
+            return remote_worker_run
+        except ImportError as e:
+            print(f"[Orchestrator] Предупреждение: WORKER_URL установлен, "
+                  f"но remote_worker.py не найден: {e}")
+    return None
+
+
+REMOTE_WORKER = _get_remote_worker()
 
 STATE_FILE   = ROOT / "research_state.json"
 PLAYBOOK_FILE = ROOT / "playbook.md"
@@ -168,6 +204,37 @@ SCRIPT_RUNTIME_METADATA: dict[str, dict[str, Any]] = {
         "canonical_result_key": "summary.trimmed_rank1_peak_layer_mean",
         "canonical_success_threshold": None,
     },
+    "run_qwen_cross_profile_probe.py": {
+        "model_arg": "model-name",
+        "arg_aliases": {},
+        "canonical_output_pattern": "archive/qwen35_4b_cross_profile_probe.json",
+        "canonical_result_key": "cross_profile.medium.tail_retention_rho",
+        "canonical_success_threshold": 0.4,
+    },
+    "run_qwen_per_case_diagnostic_v2.py": {
+        "model_arg": "model-name",
+        "arg_aliases": {},
+        "canonical_output_pattern": "archive/qwen35_4b_per_case_diagnostic_*.json",
+        "canonical_result_key": "spearman_rho",
+        "canonical_success_threshold": 0.4,
+        "cpu_remote_defaults": {
+            "device": "cpu",
+            "max_new_tokens": 8,
+            "group_case_cap": 1,
+        },
+    },
+    "run_qwen_per_case_diagnostic.py": {
+        "model_arg": "model-name",
+        "arg_aliases": {},
+        "canonical_output_pattern": "archive/qwen35_4b_per_case_diagnostic.json",
+        "canonical_result_key": "spearman_rho",
+        "canonical_success_threshold": 0.4,
+        "cpu_remote_defaults": {
+            "device": "cpu",
+            "max_new_tokens": 8,
+            "group_case_cap": 1,
+        },
+    },
 }
 
 
@@ -196,6 +263,9 @@ def strategist_select_next(state: dict[str, Any], target_phase: int | None = Non
         if hyp_def["phase"] != phase_filter:
             continue
         if hyp_id in completed:
+            continue
+        script_name = str(hyp_def.get("script", ""))
+        if script_name and not (SCRIPTS_DIR / script_name).exists():
             continue
         deps = hyp_def.get("depends_on", [])
         if not all(dep in completed for dep in deps):
@@ -231,7 +301,10 @@ def _apply_script_runtime_defaults(proposal: dict[str, Any]) -> dict[str, Any]:
     meta = SCRIPT_RUNTIME_METADATA.get(script_name)
     raw_args = normalized.get("args", {})
     if isinstance(raw_args, dict):
-        normalized["args"] = _normalize_script_args(script_name, raw_args)
+        normalized["args"] = _apply_cpu_remote_defaults(
+            script_name,
+            _normalize_script_args(script_name, raw_args),
+        )
     if not meta:
         return normalized
     if meta.get("canonical_output_pattern"):
@@ -243,12 +316,34 @@ def _apply_script_runtime_defaults(proposal: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _apply_cpu_remote_defaults(script_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(args)
+    if os.environ.get("ALLOW_CPU_SPACE", "").strip() != "1":
+        return normalized
+    meta = SCRIPT_RUNTIME_METADATA.get(script_name, {})
+    for key, value in meta.get("cpu_remote_defaults", {}).items():
+        normalized.setdefault(key, value)
+    return normalized
+
+
 def strategist_llm_select(state: dict[str, Any], playbook: str) -> dict[str, Any] | None:
     """
     Free-form LLM Strategist.
     Предлагает следующий эксперимент в виде JSON — может придумать новую гипотезу.
     Возвращает dict с полями: id, description, script, args, result_key, success_threshold
+    
+    Приоритет:
+    1. Локальный стратег (если USE_LOCAL_STRATEGIST=1)
+    2. DeepSeek API (если DEEPSEEK_API_KEY)
+    3. Anthropic API (если ANTHROPIC_API_KEY)
+    4. OpenAI API (если OPENAI_API_KEY)
+    5. None → fallback на rule-based
     """
+    # Проверяем локального стратега первым
+    if LOCAL_STRATEGIST:
+        print("[Strategist] Используется локальный AI-стратег")
+        return LOCAL_STRATEGIST(state, playbook)
+    
     deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     openai_key = os.environ.get("OPENAI_API_KEY")
@@ -422,6 +517,25 @@ def worker_run(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     hyp_def = EXPERIMENT_REGISTRY[hyp_id]
+
+    if dry_run:
+        print("[Worker] DRY RUN — не запускаем")
+        return {"status": "dry_run", "command": hyp_def["script"]}
+
+    # Remote worker (HF Space с GPU)
+    if REMOTE_WORKER:
+        print(f"[Worker/Remote] Запускаю {hyp_def['script']} на удалённом GPU...")
+        remote_args = _apply_cpu_remote_defaults(
+            str(hyp_def["script"]),
+            _normalize_script_args(str(hyp_def["script"]), hyp_def.get("default_args", {})),
+        )
+        return REMOTE_WORKER(
+            script=hyp_def["script"],
+            args=remote_args,
+            model=state.get("model", "Qwen/Qwen3.5-4B"),
+        )
+
+    # Local worker (subprocess)
     script_path = SCRIPTS_DIR / hyp_def["script"]
 
     if not script_path.exists():
@@ -431,10 +545,6 @@ def worker_run(
     args = build_worker_command(hyp_def, state)
 
     print(f"[Worker] Команда: {' '.join(args)}")
-
-    if dry_run:
-        print("[Worker] DRY RUN — не запускаем")
-        return {"status": "dry_run", "command": " ".join(args)}
 
     start_time = time.time()
     try:
@@ -477,7 +587,10 @@ def build_worker_command(hyp_def: dict[str, Any], state: dict[str, Any]) -> list
     meta = SCRIPT_RUNTIME_METADATA.get(script_name, {})
     model_arg = str(meta.get("model_arg", "model"))
     args = [sys.executable, str(script_path)]
-    normalized_args = _normalize_script_args(script_name, hyp_def.get("default_args", {}))
+    normalized_args = _apply_cpu_remote_defaults(
+        script_name,
+        _normalize_script_args(script_name, hyp_def.get("default_args", {})),
+    )
     for key, val in normalized_args.items():
         cli_key = f"--{str(key).replace('_', '-')}"
         if isinstance(val, (list, tuple)):
@@ -782,7 +895,19 @@ def run_loop(
     target_hypothesis: str | None = None,
     dry_run: bool = False,
     use_llm_strategist: bool = False,
+    use_local_strategist: bool = False,
+    total_hours: float | None = None,
+    max_turns: int | None = None,
+    per_call_timeout: int | None = None,
 ) -> None:
+    # Активируем локального стратега если запрошено
+    if use_local_strategist:
+        os.environ["USE_LOCAL_STRATEGIST"] = "1"
+        global LOCAL_STRATEGIST
+        LOCAL_STRATEGIST = _get_local_strategist()
+        use_llm_strategist = True  # local strategist uses the LLM path
+        print("[Orchestrator] Режим локального CLI-стратега активирован")
+
     state = load_state()
     if budget is not None:
         state["budget_remaining"] = budget  # override: --budget always wins
@@ -793,15 +918,32 @@ def run_loop(
 
     playbook = PLAYBOOK_FILE.read_text(encoding="utf-8") if PLAYBOOK_FILE.exists() else ""
 
+    # Time control
+    deadline = time.time() + total_hours * 3600 if total_hours else None
+    deadline_str = ""
+    if deadline:
+        from datetime import datetime as _dt
+        deadline_str = _dt.fromtimestamp(deadline).strftime("%H:%M:%S")
+
     print(f"\n{'═'*60}")
-    print(f"🔬 ABPT Orchestrator запущен")
+    print(f"ABPT Orchestrator запущен")
     print(f"   Model: {state.get('model', 'Qwen/Qwen3.5-4B')}")
     print(f"   Budget: {state['budget_remaining']}")
     print(f"   DRY RUN: {dry_run}")
+    if total_hours:
+        print(f"   Time limit: {total_hours}h (deadline: {deadline_str})")
+    if max_turns:
+        print(f"   Strategist max_turns: {max_turns}")
+    if per_call_timeout:
+        print(f"   Strategist timeout: {per_call_timeout}s")
     print(f"{'═'*60}")
 
     iteration = 0
     while True:
+        # Check time deadline
+        if deadline and time.time() > deadline:
+            print(f"\n[Orchestrator] Deadline reached ({total_hours}h). Stopping.")
+            break
         iteration += 1
         print(f"\n[Loop {iteration}] Strategist выбирает следующий эксперимент...")
 
@@ -811,7 +953,15 @@ def run_loop(
             hyp_id = target_hypothesis
             target_hypothesis = None
         elif use_llm_strategist:
-            llm_proposal = strategist_llm_select(state, playbook)
+            # Pass time controls to local strategist if active
+            if LOCAL_STRATEGIST:
+                llm_proposal = LOCAL_STRATEGIST(
+                    state, playbook,
+                    max_turns=max_turns,
+                    per_call_timeout=per_call_timeout,
+                )
+            else:
+                llm_proposal = strategist_llm_select(state, playbook)
             if llm_proposal:
                 llm_proposal = _apply_script_runtime_defaults(llm_proposal)
                 hyp_id = llm_proposal["id"]
@@ -944,6 +1094,18 @@ def main() -> None:
                         help="Показать план без запуска")
     parser.add_argument("--llm-strategist", action="store_true",
                         help="Использовать LLM для выбора экспериментов (нужен API ключ)")
+    parser.add_argument("--local-strategist", action="store_true",
+                        help="Использовать Claude Code CLI как AI-стратег")
+    parser.add_argument("--hours", type=float, default=None,
+                        help="Общий лимит времени в часах (например: --hours 8 для ночного запуска)")
+    parser.add_argument("--max-turns", type=int, default=None,
+                        help="Макс. tool-use шагов для Claude Code за один вызов (default: 3)")
+    parser.add_argument("--per-call-timeout", type=int, default=None,
+                        help="Таймаут на один вызов стратега в секундах (default: 300)")
+    parser.add_argument("--worker-url", type=str, default=None,
+                        help="URL удалённого GPU worker (HF Space)")
+    parser.add_argument("--worker-token", type=str, default=None,
+                        help="Bearer токен для удалённого worker")
     parser.add_argument("--status", action="store_true",
                         help="Показать текущий state и выйти")
     args = parser.parse_args()
@@ -953,12 +1115,24 @@ def main() -> None:
         print_status(state)
         return
 
+    # Activate remote worker if URL provided
+    if args.worker_url:
+        os.environ["WORKER_URL"] = args.worker_url
+        if args.worker_token:
+            os.environ["WORKER_TOKEN"] = args.worker_token
+        global REMOTE_WORKER
+        REMOTE_WORKER = _get_remote_worker()
+
     run_loop(
         budget=args.budget,
         target_phase=args.phase,
         target_hypothesis=args.experiment,
         dry_run=args.dry_run,
         use_llm_strategist=args.llm_strategist,
+        use_local_strategist=args.local_strategist,
+        total_hours=args.hours,
+        max_turns=args.max_turns,
+        per_call_timeout=args.per_call_timeout,
     )
 
 

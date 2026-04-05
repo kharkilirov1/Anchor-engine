@@ -1,0 +1,9 @@
+torch>=2.0
+torchao
+transformers>=4.40
+accelerate
+huggingface_hub
+spaces
+numpy
+scipy
+einops

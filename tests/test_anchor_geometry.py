@@ -18,6 +18,7 @@ from src.utils.anchor_geometry import (
 class DummyTokenizer:
     def __init__(self) -> None:
         self.surface_to_ids = {
+            "strictly vegan meal plan": [11, 12, 13, 14],
             "strictly": [11],
             " vegan": [12],
             " meal": [13],
@@ -52,6 +53,22 @@ class DummyTokenizer:
         return [self.converted[int(token_id)] for token_id in token_ids]
 
 
+class DummyBatchEncoding:
+    def __init__(self, input_ids: list[int]) -> None:
+        self.input_ids = input_ids
+
+    def __getitem__(self, key: str) -> list[int]:
+        if key != "input_ids":
+            raise KeyError(key)
+        return self.input_ids
+
+
+class DummyTokenizerBatchEncoding(DummyTokenizer):
+    def __call__(self, text: str, add_special_tokens: bool = False) -> DummyBatchEncoding:
+        _ = add_special_tokens
+        return DummyBatchEncoding(list(self.surface_to_ids.get(text, [])))
+
+
 def test_select_representative_layers_matches_qwen_style_targets() -> None:
     assert select_representative_layers(28) == [7, 14, 21, 27]
 
@@ -76,6 +93,19 @@ def test_match_anchor_span_prefers_offsets_when_available() -> None:
     assert match.token_start == 1
     assert match.token_end == 4
     assert match.match_method == "offset_mapping"
+
+
+def test_match_anchor_span_supports_batch_encoding_like_tokenizer_outputs() -> None:
+    match = match_anchor_span(
+        text="strictly vegan meal plan",
+        anchor_text="strictly vegan meal plan",
+        input_ids=[11, 12, 13, 14],
+        tokenizer=DummyTokenizerBatchEncoding(),
+        offsets=None,
+    )
+    assert match is not None
+    assert match.token_start == 0
+    assert match.token_end == 3
 
 
 def test_decode_token_helpers_and_leading_whitespace_marker() -> None:

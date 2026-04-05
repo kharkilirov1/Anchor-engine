@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import torch
@@ -200,7 +201,20 @@ def _match_from_token_ids(
             encoded = tokenizer(variant, add_special_tokens=False)
         except Exception:
             continue
-        phrase_ids = encoded.get("input_ids") if isinstance(encoded, dict) else encoded
+        phrase_ids: Any
+        if isinstance(encoded, Mapping):
+            phrase_ids = encoded.get("input_ids")
+        elif hasattr(encoded, "input_ids"):
+            phrase_ids = getattr(encoded, "input_ids")
+        elif hasattr(encoded, "__getitem__"):
+            try:
+                phrase_ids = encoded["input_ids"]
+            except Exception:
+                phrase_ids = encoded
+        else:
+            phrase_ids = encoded
+        if phrase_ids is None:
+            continue
         if isinstance(phrase_ids, torch.Tensor):
             phrase_seq = [int(token) for token in phrase_ids.reshape(-1).tolist()]
         else:

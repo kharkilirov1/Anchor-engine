@@ -40,6 +40,65 @@ def test_build_worker_command_normalizes_known_script_args() -> None:
     assert "--anchor-profile" not in layer_profile_command
 
 
+def test_build_worker_command_applies_cpu_remote_safe_defaults(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOW_CPU_SPACE", "1")
+    hyp_def = {
+        "script": "run_qwen_per_case_diagnostic_v2.py",
+        "default_args": {"profile": "short"},
+    }
+    state = {"model": "Qwen/Qwen3.5-4B"}
+
+    command = orchestrate.build_worker_command(hyp_def, state)
+
+    assert "--device" in command
+    assert "cpu" in command
+    assert "--max-new-tokens" in command
+    assert "8" in command
+    assert "--group-case-cap" in command
+    assert "1" in command
+
+
+def test_strategist_select_next_skips_missing_script(monkeypatch) -> None:
+    original_registry = dict(orchestrate.EXPERIMENT_REGISTRY)
+    monkeypatch.setattr(
+        orchestrate,
+        "EXPERIMENT_REGISTRY",
+        {
+            "BROKEN": {
+                "description": "broken",
+                "phase": 1,
+                "script": "run_qwen_missing_probe.py",
+                "default_args": {},
+                "output_pattern": "archive/missing.json",
+                "result_key": "summary.value",
+                "success_threshold": 0.0,
+                "depends_on": [],
+            },
+            "GOOD": {
+                "description": "good",
+                "phase": 1,
+                "script": "run_qwen_phase_probe.py",
+                "default_args": {"anchor_profile": "short", "tau": "0.5"},
+                "output_pattern": "archive/*.json",
+                "result_key": "summary.value",
+                "success_threshold": 0.0,
+                "depends_on": [],
+            },
+        },
+    )
+
+    state = {
+        "budget_remaining": 1,
+        "current_phase": 1,
+        "phases": {"phase_1": {"experiments": []}},
+    }
+
+    try:
+        assert orchestrate.strategist_select_next(state) == "GOOD"
+    finally:
+        monkeypatch.setattr(orchestrate, "EXPERIMENT_REGISTRY", original_registry)
+
+
 def test_analyzer_parse_result_uses_worker_output_file_and_synthesizes_carryover_summary(
     tmp_path: Path,
     monkeypatch,

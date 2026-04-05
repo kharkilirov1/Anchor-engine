@@ -142,7 +142,7 @@ def _auc(r1_profile: dict[str, float | None], start: int, end: int) -> float:
     vals = [v if v is not None else 0.0 for v in vals]
     if len(vals) < 2:
         return float(vals[0]) if vals else 0.0
-    return float(np.trapz(vals))
+    return float(np.trapezoid(vals))
 
 
 def compute_phase_metrics(
