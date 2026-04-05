@@ -32,6 +32,7 @@ from src.model.config import TOY_CONFIG
 from src.model.qwen_anchor_overlay import QwenAnchorOverlay
 from src.utils.anchor_geometry import (
     AnchorSpanMatch,
+    auto_calibrate_thresholds,
     build_tail_reference_layers,
     compute_geometry_metrics,
     detect_anchor_span,
@@ -97,17 +98,6 @@ def probe_geometry(
     if attentions is None and hasattr(outputs, "language_model_outputs"):
         attentions = getattr(outputs.language_model_outputs, "attentions", None)
 
-    # Diagnostic: log output structure on first call
-    if not hasattr(probe_geometry, "_diag_done"):
-        probe_geometry._diag_done = True
-        out_keys = [k for k in dir(outputs) if not k.startswith("_")]
-        print(f"  [diag] output fields: {out_keys}")
-        print(f"  [diag] attentions is None: {attentions is None}")
-        if attentions is not None:
-            print(f"  [diag] attentions type: {type(attentions)}, len: {len(attentions)}")
-        if hidden_states is not None:
-            print(f"  [diag] hidden_states len: {len(hidden_states)}")
-
     # Primary: attention-based anchor detection
     span_match = None
     if attentions is not None:
@@ -170,7 +160,6 @@ def probe_geometry(
 
     # Extract r1 profile across probe layers
     r1_profile: dict[str, float | None] = {}
-    _first_layer_diag = not hasattr(probe_geometry, "_r1_diag_done")
     for layer_idx in probe_layers:
         hs_idx = layer_idx + 1
         if hs_idx >= len(hidden_states):
@@ -181,12 +170,8 @@ def probe_geometry(
             delta_vecs = extract_delta_vectors(hs, span_match.token_start, span_match.token_end)
             metrics = compute_geometry_metrics(delta_vecs)
             r1_profile[str(layer_idx)] = metrics.get("rank1_explained_variance")
-        except (ValueError, RuntimeError) as e:
+        except (ValueError, RuntimeError):
             r1_profile[str(layer_idx)] = None
-            if _first_layer_diag:
-                probe_geometry._r1_diag_done = True
-                print(f"  [diag] r1 failed: span=[{span_match.token_start},{span_match.token_end}] "
-                      f"hs.shape={hs.shape} err={e}")
 
     # Classify cluster
     mature_layer = reference_layers["mature_layer"]
@@ -417,11 +402,12 @@ def main() -> None:
     print(f"Reference: mature=L{reference_layers['mature_layer']}, "
           f"template=L{reference_layers['template_prev_layer']}-L{reference_layers['template_curr_layer']}")
 
-    # ── Phase 1: Geometry classification ────────────────────────────
+    # ── Phase 1: Geometry probing + auto-calibration ─────────────────
     print(f"\n{'='*60}")
-    print("  PHASE 1: Geometry classification")
+    print("  PHASE 1a: Geometry probing (collect metrics)")
     print(f"{'='*60}")
 
+    # Pass 1: collect raw r1 and delta_template for all domains
     geometries: list[dict[str, Any]] = []
     for domain in domains:
         geo = probe_geometry(
@@ -430,12 +416,58 @@ def main() -> None:
             template_delta_threshold=args.template_delta_threshold,
         )
         geometries.append(geo)
+        r1 = geo.get("r1_reference")
+        r1_s = f"{r1:.3f}" if r1 is not None else "N/A"
+        dt = geo.get("delta_template_pair")
+        dt_s = f"{dt:+.4f}" if dt is not None else "N/A"
+        method = geo.get("match_method", geo.get("reason", "?"))
+        print(f"  {domain.name:<35} r1={r1_s:<8} delta_tpl={dt_s:<10} match={method}")
+
+    # Pass 2: auto-calibrate thresholds from observed distribution
+    r1_values = [g["r1_reference"] for g in geometries if g.get("r1_reference") is not None]
+    dt_values = [g["delta_template_pair"] for g in geometries if g.get("delta_template_pair") is not None]
+
+    calibration: dict[str, Any] = {}
+    if len(r1_values) >= 3 and len(dt_values) == len(r1_values):
+        calibration = auto_calibrate_thresholds(r1_values, dt_values)
+        cal_r1 = calibration["mature_r1_threshold"]
+        cal_dt = calibration["template_delta_threshold"]
+        print(f"\n  Auto-calibrated thresholds (k-means on {calibration['n_samples']} samples):")
+        print(f"    mature_r1_threshold:    {args.mature_r1_threshold:.3f} → {cal_r1:.3f}")
+        print(f"    template_delta_threshold: {args.template_delta_threshold:.4f} → {cal_dt:.4f}")
+        for cc in calibration.get("cluster_centers", []):
+            print(f"    cluster '{cc['label']}': r1={cc['r1']:.3f}, delta={cc['delta']:+.4f}")
+    else:
+        cal_r1 = args.mature_r1_threshold
+        cal_dt = args.template_delta_threshold
+        print(f"\n  Not enough data for auto-calibration ({len(r1_values)} samples), using defaults")
+
+    # Pass 3: reclassify with calibrated thresholds
+    print(f"\n{'='*60}")
+    print("  PHASE 1b: Classification (calibrated thresholds)")
+    print(f"{'='*60}")
+
+    for geo in geometries:
+        if not geo.get("matched"):
+            continue
+        r1_ref = geo.get("r1_reference")
+        delta_tpl = geo.get("delta_template_pair")
+        if r1_ref is not None and r1_ref > cal_r1:
+            geo["cluster"] = "mature"
+            geo["route"] = "base"
+        elif delta_tpl is not None and delta_tpl > cal_dt:
+            geo["cluster"] = "template"
+            geo["route"] = "base"
+        else:
+            geo["cluster"] = "flat"
+            geo["route"] = "anchor"
+
+    for domain, geo in zip(domains, geometries):
         cluster = geo.get("cluster", "?")
         route = geo.get("route", "?")
         r1 = geo.get("r1_reference")
         r1_s = f"{r1:.3f}" if r1 is not None else "N/A"
-        method = geo.get("match_method", geo.get("reason", "?"))
-        print(f"  {domain.name:<35} cluster={cluster:<10} r1={r1_s:<8} route={route:<8} match={method}")
+        print(f"  {domain.name:<35} cluster={cluster:<10} r1={r1_s:<8} route={route}")
 
     n_flat = sum(1 for g in geometries if g.get("cluster") == "flat")
     n_mature = sum(1 for g in geometries if g.get("cluster") == "mature")
@@ -509,9 +541,13 @@ def main() -> None:
         "n_domains": len(domains),
         "total_time_s": round(total_time, 1),
         "thresholds": {
-            "mature_r1_threshold": args.mature_r1_threshold,
-            "template_delta_threshold": args.template_delta_threshold,
+            "mature_r1_threshold_default": args.mature_r1_threshold,
+            "template_delta_threshold_default": args.template_delta_threshold,
+            "mature_r1_threshold_calibrated": cal_r1,
+            "template_delta_threshold_calibrated": cal_dt,
+            "calibration_method": calibration.get("method", "fallback_default"),
         },
+        "calibration": calibration,
         "geometry_summary": {
             "flat": n_flat,
             "mature": n_mature,
