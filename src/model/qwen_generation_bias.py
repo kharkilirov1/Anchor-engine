@@ -146,6 +146,56 @@ _VEGAN_DOMAIN_PROFILE = BiasDomainProfile(
         "pork",
     ),
 )
+_DIETARY_DOMAIN_PROFILE = BiasDomainProfile(
+    name="dietary",
+    alpha_multiplier=0.40,
+    pressure_threshold_shift=0.10,
+    rescue_floor_multiplier=0.40,
+    forbidden_penalty=8.0,
+    hard_block_forbidden=True,
+    allow_terms=(),  # populated per-domain via token weights
+    block_terms=(),
+)
+_CODE_STRICT_DOMAIN_PROFILE = BiasDomainProfile(
+    name="code_strict",
+    alpha_multiplier=0.85,
+    pressure_threshold_shift=0.06,
+    rescue_floor_multiplier=0.80,
+    forbidden_penalty=7.0,
+    hard_block_forbidden=True,
+    allow_terms=(),
+    block_terms=(),
+)
+_LEGAL_DOMAIN_PROFILE = BiasDomainProfile(
+    name="legal",
+    alpha_multiplier=0.55,
+    pressure_threshold_shift=0.15,
+    rescue_floor_multiplier=0.30,
+    forbidden_penalty=5.0,
+    hard_block_forbidden=True,
+    allow_terms=(),
+    block_terms=(),
+)
+_MEDICAL_DOMAIN_PROFILE = BiasDomainProfile(
+    name="medical",
+    alpha_multiplier=0.50,
+    pressure_threshold_shift=0.18,
+    rescue_floor_multiplier=0.25,
+    forbidden_penalty=6.0,
+    hard_block_forbidden=True,
+    allow_terms=(),
+    block_terms=(),
+)
+_CONSTRAINT_DOMAIN_PROFILE = BiasDomainProfile(
+    name="constraint",
+    alpha_multiplier=0.65,
+    pressure_threshold_shift=0.10,
+    rescue_floor_multiplier=0.45,
+    forbidden_penalty=5.0,
+    hard_block_forbidden=True,
+    allow_terms=(),
+    block_terms=(),
+)
 
 
 def _sanitize_logits(logits: torch.Tensor) -> torch.Tensor:
@@ -158,6 +208,23 @@ def _clamp_unit_interval(value: float, default: float = 0.0) -> float:
     return min(1.0, max(0.0, float(value)))
 
 
+_PROFILE_REGISTRY: dict[str, BiasDomainProfile] = {
+    "default": _DEFAULT_DOMAIN_PROFILE,
+    "math": _MATH_DOMAIN_PROFILE,
+    "code": _CODE_DOMAIN_PROFILE,
+    "vegan": _VEGAN_DOMAIN_PROFILE,
+    "dietary": _DIETARY_DOMAIN_PROFILE,
+    "code_strict": _CODE_STRICT_DOMAIN_PROFILE,
+    "legal": _LEGAL_DOMAIN_PROFILE,
+    "medical": _MEDICAL_DOMAIN_PROFILE,
+    "constraint": _CONSTRAINT_DOMAIN_PROFILE,
+}
+
+
+def get_profile_by_name(name: str) -> BiasDomainProfile:
+    return _PROFILE_REGISTRY.get(name, _DEFAULT_DOMAIN_PROFILE)
+
+
 def infer_bias_domain(prompt: str) -> str:
     lowered = prompt.lower()
     if any(token in lowered for token in ("sqrt", "proof by contradiction", "irrational", "rational")):
@@ -166,18 +233,22 @@ def infer_bias_domain(prompt: str) -> str:
         return "code"
     if any(token in lowered for token in ("vegan", "meal plan", "plant-based", "chef")):
         return "vegan"
+    if any(token in lowered for token in ("halal", "gluten-free", "gluten free", "kosher")):
+        return "dietary"
+    if any(token in lowered for token in ("gdpr", "compliance", "legal", "retention policy")):
+        return "legal"
+    if any(token in lowered for token in ("opioid", "pharmacological", "medication", "chronic pain")):
+        return "medical"
+    if any(token in lowered for token in ("unsafe", "raw pointer", "strict null", "no orm")):
+        return "code_strict"
+    if any(token in lowered for token in ("kubernetes", "kubectl", "deployment guide")):
+        return "code"
     return "default"
 
 
 def get_bias_domain_profile(prompt: str) -> BiasDomainProfile:
     domain = infer_bias_domain(prompt)
-    if domain == "math":
-        return _MATH_DOMAIN_PROFILE
-    if domain == "code":
-        return _CODE_DOMAIN_PROFILE
-    if domain == "vegan":
-        return _VEGAN_DOMAIN_PROFILE
-    return _DEFAULT_DOMAIN_PROFILE
+    return _PROFILE_REGISTRY.get(domain, _DEFAULT_DOMAIN_PROFILE)
 
 
 def _extract_token_ids_from_term(
