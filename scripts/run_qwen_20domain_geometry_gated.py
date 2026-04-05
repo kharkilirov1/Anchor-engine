@@ -90,7 +90,23 @@ def probe_geometry(
         )
 
     hidden_states = outputs.hidden_states
+    # Robust attention extraction: some model wrappers nest attentions
     attentions = getattr(outputs, "attentions", None)
+    if attentions is None:
+        attentions = getattr(outputs, "decoder_attentions", None)
+    if attentions is None and hasattr(outputs, "language_model_outputs"):
+        attentions = getattr(outputs.language_model_outputs, "attentions", None)
+
+    # Diagnostic: log output structure on first call
+    if not hasattr(probe_geometry, "_diag_done"):
+        probe_geometry._diag_done = True
+        out_keys = [k for k in dir(outputs) if not k.startswith("_")]
+        print(f"  [diag] output fields: {out_keys}")
+        print(f"  [diag] attentions is None: {attentions is None}")
+        if attentions is not None:
+            print(f"  [diag] attentions type: {type(attentions)}, len: {len(attentions)}")
+        if hidden_states is not None:
+            print(f"  [diag] hidden_states len: {len(hidden_states)}")
 
     # Primary: attention-based anchor detection
     span_match = None
@@ -154,6 +170,7 @@ def probe_geometry(
 
     # Extract r1 profile across probe layers
     r1_profile: dict[str, float | None] = {}
+    _first_layer_diag = not hasattr(probe_geometry, "_r1_diag_done")
     for layer_idx in probe_layers:
         hs_idx = layer_idx + 1
         if hs_idx >= len(hidden_states):
@@ -164,8 +181,12 @@ def probe_geometry(
             delta_vecs = extract_delta_vectors(hs, span_match.token_start, span_match.token_end)
             metrics = compute_geometry_metrics(delta_vecs)
             r1_profile[str(layer_idx)] = metrics.get("rank1_explained_variance")
-        except (ValueError, RuntimeError):
+        except (ValueError, RuntimeError) as e:
             r1_profile[str(layer_idx)] = None
+            if _first_layer_diag:
+                probe_geometry._r1_diag_done = True
+                print(f"  [diag] r1 failed: span=[{span_match.token_start},{span_match.token_end}] "
+                      f"hs.shape={hs.shape} err={e}")
 
     # Classify cluster
     mature_layer = reference_layers["mature_layer"]
