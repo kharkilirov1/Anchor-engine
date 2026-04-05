@@ -237,6 +237,66 @@ def _match_from_token_ids(
     )
 
 
+def _match_from_decoded_pieces(
+    *,
+    anchor_text: str,
+    input_ids: list[int],
+    tokenizer: Any,
+) -> AnchorSpanMatch | None:
+    """Fallback: decode each token individually, build char→token map, search."""
+    pieces = decode_token_pieces(tokenizer, input_ids)
+    if not pieces:
+        return None
+
+    # Build cumulative decoded string with token boundary tracking
+    char_to_token: list[int] = []
+    decoded_full = ""
+    for tok_idx, piece in enumerate(pieces):
+        for _ in piece:
+            char_to_token.append(tok_idx)
+        decoded_full += piece
+
+    if not decoded_full:
+        return None
+
+    # Search for anchor_text (case-insensitive to handle tokenizer quirks)
+    needle = anchor_text.lower()
+    haystack = decoded_full.lower()
+    matches: list[int] = []
+    start_pos = 0
+    while True:
+        pos = haystack.find(needle, start_pos)
+        if pos == -1:
+            break
+        matches.append(pos)
+        start_pos = pos + 1
+
+    if len(matches) != 1:
+        return None
+
+    char_start = matches[0]
+    char_end = char_start + len(needle)
+
+    # Map character positions to token indices
+    if char_start >= len(char_to_token) or char_end - 1 >= len(char_to_token):
+        return None
+
+    token_start = char_to_token[char_start]
+    token_end = char_to_token[min(char_end - 1, len(char_to_token) - 1)]
+
+    matched_text = decoded_full[char_start:char_end]
+    return AnchorSpanMatch(
+        anchor_text=anchor_text,
+        token_start=token_start,
+        token_end=token_end,
+        token_count=token_end - token_start + 1,
+        char_start=None,
+        char_end=None,
+        match_method="decoded_pieces",
+        matched_text=matched_text,
+    )
+
+
 def match_anchor_span(
     *,
     text: str,
@@ -253,7 +313,14 @@ def match_anchor_span(
         )
         if match is not None:
             return match
-    return _match_from_token_ids(
+    match = _match_from_token_ids(
+        anchor_text=anchor_text,
+        input_ids=input_ids,
+        tokenizer=tokenizer,
+    )
+    if match is not None:
+        return match
+    return _match_from_decoded_pieces(
         anchor_text=anchor_text,
         input_ids=input_ids,
         tokenizer=tokenizer,
@@ -389,4 +456,115 @@ def compute_cross_prompt_stability(
         "std_pairwise_cosine": float(math.sqrt(max(variance, 0.0))),
         "min_pairwise_cosine": float(min(values)),
         "max_pairwise_cosine": float(max(values)),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-calibration: k-means clustering for mature/template/flat thresholds
+# ─────────────────────────────────────────────────────────────────────────────
+
+def auto_calibrate_thresholds(
+    r1_references: list[float],
+    delta_templates: list[float],
+    n_clusters: int = 3,
+    max_iter: int = 50,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Compute cluster thresholds from observed r1/delta values via k-means.
+
+    Returns dict with:
+      - mature_r1_threshold: float
+      - template_delta_threshold: float
+      - cluster_centers: list of (r1_center, delta_center)
+      - cluster_labels: list of "mature"/"template"/"flat" per sample
+      - n_samples: int
+    """
+    n = len(r1_references)
+    if n < 3 or len(delta_templates) != n:
+        return {
+            "mature_r1_threshold": 0.65,
+            "template_delta_threshold": 0.08,
+            "cluster_centers": [],
+            "cluster_labels": [],
+            "n_samples": n,
+            "method": "fallback_default",
+        }
+
+    import random
+    rng = random.Random(seed)
+
+    # Normalize features to [0, 1] range for balanced clustering
+    r1_arr = list(r1_references)
+    dt_arr = list(delta_templates)
+    r1_min, r1_max = min(r1_arr), max(r1_arr)
+    dt_min, dt_max = min(dt_arr), max(dt_arr)
+    r1_range = max(r1_max - r1_min, _EPS)
+    dt_range = max(dt_max - dt_min, _EPS)
+
+    points = [
+        ((r - r1_min) / r1_range, (d - dt_min) / dt_range)
+        for r, d in zip(r1_arr, dt_arr)
+    ]
+
+    # k-means initialization
+    indices = rng.sample(range(n), min(n_clusters, n))
+    centers = [points[i] for i in indices]
+
+    for _ in range(max_iter):
+        # Assign
+        assignments: list[int] = []
+        for p in points:
+            dists = [(p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2 for c in centers]
+            assignments.append(int(min(range(len(dists)), key=lambda x: dists[x])))
+
+        # Update
+        new_centers: list[tuple[float, float]] = []
+        for k in range(n_clusters):
+            members = [points[i] for i in range(n) if assignments[i] == k]
+            if not members:
+                new_centers.append(centers[k])
+            else:
+                new_centers.append((
+                    sum(m[0] for m in members) / len(members),
+                    sum(m[1] for m in members) / len(members),
+                ))
+        if new_centers == centers:
+            break
+        centers = new_centers
+
+    # Denormalize centers back to original scale
+    real_centers = [
+        (c[0] * r1_range + r1_min, c[1] * dt_range + dt_min)
+        for c in centers
+    ]
+
+    # Identify clusters: highest r1 center = mature, highest delta center = template, rest = flat
+    sorted_by_r1 = sorted(range(len(real_centers)), key=lambda i: real_centers[i][0], reverse=True)
+    mature_idx = sorted_by_r1[0]
+    remaining = [i for i in range(len(real_centers)) if i != mature_idx]
+    template_idx = max(remaining, key=lambda i: real_centers[i][1])
+    flat_idx = [i for i in remaining if i != template_idx][0] if len(remaining) > 1 else remaining[0]
+
+    cluster_map = {mature_idx: "mature", template_idx: "template", flat_idx: "flat"}
+    labels = [cluster_map.get(assignments[i], "flat") for i in range(n)]
+
+    # Compute thresholds as midpoints between cluster centers
+    mature_r1_center = real_centers[mature_idx][0]
+    flat_r1_center = real_centers[flat_idx][0]
+    mature_r1_threshold = (mature_r1_center + flat_r1_center) / 2.0
+
+    template_delta_center = real_centers[template_idx][1]
+    flat_delta_center = real_centers[flat_idx][1]
+    template_delta_threshold = (template_delta_center + flat_delta_center) / 2.0
+
+    return {
+        "mature_r1_threshold": float(mature_r1_threshold),
+        "template_delta_threshold": float(template_delta_threshold),
+        "cluster_centers": [
+            {"label": cluster_map[i], "r1": real_centers[i][0], "delta": real_centers[i][1]}
+            for i in range(len(real_centers))
+        ],
+        "cluster_labels": labels,
+        "n_samples": n,
+        "method": "kmeans_3",
     }

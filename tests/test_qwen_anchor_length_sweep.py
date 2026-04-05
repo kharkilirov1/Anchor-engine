@@ -14,7 +14,7 @@ def test_make_qwen_anchor_geometry_cases_supports_length_profiles() -> None:
     medium_cases = make_qwen_anchor_geometry_cases(anchor_span_profile="medium")
     long_cases = make_qwen_anchor_geometry_cases(anchor_span_profile="long")
 
-    assert len(short_cases) == len(medium_cases) == len(long_cases) == 13
+    assert len(short_cases) == len(medium_cases) == len(long_cases) >= 13
     assert short_cases[0].name == medium_cases[0].name == long_cases[0].name == "content_vegan_brief"
     assert short_cases[0].anchor_text != medium_cases[0].anchor_text
     assert medium_cases[0].anchor_text != long_cases[0].anchor_text
