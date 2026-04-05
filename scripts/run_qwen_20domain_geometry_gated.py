@@ -122,6 +122,26 @@ def probe_geometry(
             "reason": "no_anchor_detected",
         }
 
+    # Ensure span is wide enough for meaningful geometry (need ≥3 tokens for r1)
+    seq_len = len(input_ids)
+    MIN_GEOMETRY_TOKENS = 3
+    if span_match.token_count < MIN_GEOMETRY_TOKENS:
+        center = (span_match.token_start + span_match.token_end) // 2
+        half = MIN_GEOMETRY_TOKENS // 2
+        new_start = max(1, center - half)  # skip BOS
+        new_end = min(seq_len - 2, new_start + MIN_GEOMETRY_TOKENS - 1)
+        new_start = max(1, new_end - MIN_GEOMETRY_TOKENS + 1)
+        span_match = AnchorSpanMatch(
+            anchor_text=span_match.anchor_text,
+            token_start=new_start,
+            token_end=new_end,
+            token_count=new_end - new_start + 1,
+            char_start=span_match.char_start,
+            char_end=span_match.char_end,
+            match_method=f"{span_match.match_method}+expanded",
+            matched_text=span_match.matched_text,
+        )
+
     # Decode detected span for logging
     detected_text = ""
     try:
@@ -363,6 +383,7 @@ def main() -> None:
         cfg=cfg,
         device=args.device,
         torch_dtype=torch.float16 if "cuda" in args.device else None,
+        attn_implementation="eager",  # required for output_attentions=True
     )
     overlay.eval()
 
