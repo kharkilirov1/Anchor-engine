@@ -27,6 +27,7 @@ DEFAULT_PER_CALL_TIMEOUT = 600  # 10 минут на один вызов
 DEFAULT_BACKEND = "codex"
 DEFAULT_CODEX_MODE = "autonomous"
 DEFAULT_FALLBACK_CHAIN = "codex,claude"
+DEFAULT_CODEX_AUTONOMOUS_TIMEOUT = 90
 
 
 def _list_run_qwen_scripts() -> list[str]:
@@ -96,8 +97,24 @@ def _build_codex_template_catalog() -> list[dict[str, Any]]:
             "template_id": "layer_profile_map",
             "description": "Map peak geometry layers across profiles to refine the crystallization zone hypothesis.",
             "script": "run_qwen_anchor_layer_profile_map.py",
-            "args": {},
+            "args": {"profiles": ["medium"], "limit": 2, "device": "cpu"},
             "result_key": "summary.trimmed_rank1_peak_layer_mean",
+            "success_threshold": None,
+        },
+        {
+            "template_id": "injection_geometry_medium",
+            "description": "Test whether injected anchors have geometry distinct from legitimate anchors on medium profile.",
+            "script": "run_qwen_injection_geometry_probe.py",
+            "args": {"profile": "medium", "group_case_cap": 2, "device": "cpu"},
+            "result_key": "summary.detection_auc",
+            "success_threshold": 0.7,
+        },
+        {
+            "template_id": "contradiction_carryover_medium",
+            "description": "Inspect contradiction_proof carryover on medium profile to explain the known harmful anchor delta.",
+            "script": "run_qwen_anchor_carryover_probe.py",
+            "args": {"profiles": ["medium"], "case_name": "procedure_contradiction_proof", "device": "cpu"},
+            "result_key": "summary.mean_last_token_delta",
             "success_threshold": None,
         },
     ]
@@ -172,12 +189,15 @@ def _build_codex_template_prompt(state: dict[str, Any], playbook: str) -> tuple[
 def _build_codex_free_existing_prompt(state: dict[str, Any], playbook: str) -> tuple[str, dict[str, Any]]:
     available_scripts = _list_run_qwen_scripts()
     cpu_mode = os.environ.get("ALLOW_CPU_SPACE", "").strip() == "1"
+    profile_resolved = _profile_comparison_resolved(state)
+    recent_profile_metrics = _extract_recent_profile_metrics(state)
     script_help = {
         "run_qwen_phase_probe.py": "tail_retention / phase metrics correlation probe; args like anchor_profile, tau",
         "run_qwen_cross_profile_probe.py": "robust short/medium/long correlation comparison; no extra args needed",
         "run_qwen_per_case_diagnostic_v2.py": "flat per-case diagnostic; args like profile=short|medium|long",
         "run_qwen_anchor_geometry_probe.py": "tokenization-controlled geometry/beacon evidence probe",
         "run_qwen_anchor_carryover_probe.py": "carryover vs routing threshold comparison; args like profiles=['medium']",
+        "run_qwen_injection_geometry_probe.py": "compare legitimate vs injected anchor geometry and report summary.detection_auc",
         "run_qwen_geometry_generation_calibration.py": "generation calibration / rescue evaluation on geometry-selected cases",
         "run_qwen_anchor_layer_profile_map.py": "map rank1/coherence peak layers across profiles",
         "run_qwen_anchor_geometry_profile_sweep.py": "profile sweep over geometry support summaries",
@@ -204,10 +224,22 @@ def _build_codex_free_existing_prompt(state: dict[str, Any], playbook: str) -> t
 
     cpu_hint = (
         "\nCPU-only overnight mode is active:\n"
-        "- Prefer `run_qwen_per_case_diagnostic_v2.py`\n"
-        "- Use args like {\"profile\":\"short|medium|long\",\"max_new_tokens\":8,\"group_case_cap\":1,\"device\":\"cpu\"}\n"
-        "- Avoid heavy multi-profile or long-generation probes unless explicitly necessary\n\n"
+        "- Prefer scripts that create NEW evidence, not more profile confirmation\n"
+        "- Good CPU-safe candidates: `run_qwen_injection_geometry_probe.py`, `run_qwen_anchor_layer_profile_map.py`, `run_qwen_anchor_carryover_probe.py`, `run_qwen_anchor_concept_direction_map.py`, `run_qwen_future_influence_probe.py`\n"
+        "- If you use `run_qwen_per_case_diagnostic_v2.py`, do it only when reproducing a changed script or infrastructure bug\n"
+        "- Keep args lightweight: `device=cpu`, single profile, `group_case_cap=1..2`, `limit<=2` where available\n"
+        "- For carryover contradiction diagnosis use `case_name=carryover_contradiction`\n"
+        "- Future influence on 4B CPU is likely to timeout unless you change model or add a very narrow `case_filter`\n\n"
         if cpu_mode
+        else ""
+    )
+    resolved_hint = (
+        "Resolved profile evidence:\n"
+        f"- recent_profile_metrics={json.dumps(recent_profile_metrics, ensure_ascii=False)}\n"
+        "- medium is already confirmed strongest\n"
+        "- short and long are already below confirmation threshold\n"
+        "- therefore do NOT choose another short/medium/long comparison run unless you changed the measurement code\n\n"
+        if profile_resolved
         else ""
     )
 
@@ -225,6 +257,7 @@ def _build_codex_free_existing_prompt(state: dict[str, Any], playbook: str) -> t
         f"Known facts: {json.dumps(state.get('known_facts', {}), ensure_ascii=False)}\n"
         f"Recent experiments: {json.dumps(completed[-12:], ensure_ascii=False)}\n\n"
         + cpu_hint +
+        resolved_hint +
         "Allowed scripts:\n"
         + "\n".join(lines)
         + "\n\nPlaybook tail:\n"
@@ -292,10 +325,38 @@ def _load_recent_failure_context(limit: int = 8) -> list[dict[str, Any]]:
     return rows[-limit:]
 
 
+def _extract_recent_profile_metrics(state: dict[str, Any]) -> dict[str, float]:
+    by_profile: dict[str, float] = {}
+    for phase_data in state.get("phases", {}).values():
+        for exp in phase_data.get("experiments", []):
+            metric = exp.get("metric_value")
+            if metric is None:
+                continue
+            hyp_id = str(exp.get("hypothesis_id", "")).lower()
+            if "medium" in hyp_id:
+                by_profile["medium"] = float(metric)
+            elif "short" in hyp_id:
+                by_profile["short"] = float(metric)
+            elif "long" in hyp_id:
+                by_profile["long"] = float(metric)
+    return by_profile
+
+
+def _profile_comparison_resolved(state: dict[str, Any]) -> bool:
+    metrics = _extract_recent_profile_metrics(state)
+    return (
+        metrics.get("medium", -1.0) >= 0.4
+        and metrics.get("short", 1.0) < 0.4
+        and metrics.get("long", 1.0) < 0.4
+    )
+
+
 def _build_codex_autonomous_prompt(state: dict[str, Any], playbook: str) -> tuple[str, dict[str, Any]]:
     available_scripts = _list_run_qwen_scripts()
     recent_failures = _load_recent_failure_context()
     cpu_mode = os.environ.get("ALLOW_CPU_SPACE", "").strip() == "1"
+    profile_resolved = _profile_comparison_resolved(state)
+    recent_profile_metrics = _extract_recent_profile_metrics(state)
     recent_history = []
     for phase_data in state.get("phases", {}).values():
         for exp in phase_data.get("experiments", []):
@@ -310,10 +371,25 @@ def _build_codex_autonomous_prompt(state: dict[str, Any], playbook: str) -> tupl
 
     cpu_hint = (
         "CPU-only overnight mode is active. Treat the HF Space as CPU hardware.\n"
-        "Prefer lightweight diagnostics, especially `run_qwen_per_case_diagnostic_v2.py` with "
-        "`max_new_tokens<=8`, `group_case_cap=1`, `device=cpu`, and one profile at a time.\n"
-        "Do not select expensive multi-profile probes unless you have already verified they fit.\n\n"
+        "Use lightweight configurations first.\n"
+        "Examples that should fit tonight:\n"
+        "- `run_qwen_injection_geometry_probe.py --profile medium --group-case-cap 2 --device cpu`\n"
+        "- `run_qwen_anchor_layer_profile_map.py --profiles medium --limit 2 --device cpu`\n"
+        "- `run_qwen_anchor_carryover_probe.py --profiles medium --case_name carryover_contradiction --device cpu`\n"
+        "- `run_qwen_anchor_concept_direction_map.py --profiles medium --limit 2 --device cpu`\n"
+        "- `run_qwen_future_influence_probe.py` only with a smaller model or narrow case filter\n"
+        "Avoid heavy all-profile sweeps unless they are the only way to resolve a live ambiguity.\n\n"
         if cpu_mode
+        else ""
+    )
+    resolved_hint = (
+        "Profile ranking is already resolved from recent data: "
+        f"{json.dumps(recent_profile_metrics, ensure_ascii=False)}.\n"
+        "Interpret this as: medium is strong, long is weak, short is negative.\n"
+        "Do NOT spend the next budget on more short/medium/long per-case diagnostics or cross-profile confirmation.\n"
+        "Prioritize NEW information: needed layers, injection-vs-legit geometry, contradiction_proof failure mode, "
+        "fastapi instability, carryover localization, or future-influence / concept-direction structure.\n\n"
+        if profile_resolved
         else ""
     )
 
@@ -345,6 +421,7 @@ def _build_codex_autonomous_prompt(state: dict[str, Any], playbook: str) -> tupl
         f"Recent experiments: {json.dumps(recent_history[-12:], ensure_ascii=False)}\n"
         f"Recent failures / null results: {json.dumps(recent_failures, ensure_ascii=False)}\n\n"
         + cpu_hint +
+        resolved_hint +
         "Important repo locations to inspect:\n"
         "- research_state.json\n"
         "- playbook.md\n"
@@ -481,10 +558,14 @@ def _run_codex_backend(
 ) -> tuple[dict[str, Any] | None, str | None]:
     last_raw: str | None = None
     proposal: dict[str, Any] | None = None
+    autonomous_timeout = min(
+        timeout,
+        int(os.environ.get("STRATEGIST_CODEX_AUTONOMOUS_TIMEOUT", DEFAULT_CODEX_AUTONOMOUS_TIMEOUT)),
+    )
 
     if codex_mode == "autonomous":
         prompt, schema = _build_codex_autonomous_prompt(state, playbook)
-        last_raw = _call_codex(prompt, timeout, schema=schema, workspace_write=True)
+        last_raw = _call_codex(prompt, autonomous_timeout, schema=schema, workspace_write=True)
         proposal = _parse_strategist_response(last_raw) if last_raw else None
         if proposal is not None:
             return proposal, last_raw
@@ -525,6 +606,9 @@ def _build_free_strategist_prompt(state: dict[str, Any]) -> str:
     """
     budget = state.get("budget_remaining", 0)
     phase = state.get("current_phase", 1)
+    cpu_mode = os.environ.get("ALLOW_CPU_SPACE", "").strip() == "1"
+    profile_resolved = _profile_comparison_resolved(state)
+    recent_profile_metrics = _extract_recent_profile_metrics(state)
 
     # Собираем историю экспериментов
     experiments_history = []
@@ -537,6 +621,29 @@ def _build_free_strategist_prompt(state: dict[str, Any]) -> str:
     history_str = "\n".join(experiments_history[-15:]) if experiments_history else "  (no experiments yet)"
 
     known_facts = json.dumps(state.get("known_facts", {}), indent=2, ensure_ascii=False)
+    cpu_hint = (
+        "\n## CPU MODE\n"
+        "- HF worker is CPU-only tonight\n"
+        "- Prefer existing lightweight scripts with CPU-safe args\n"
+        "- Good candidates: `run_qwen_injection_geometry_probe.py --profile medium --group-case-cap 2 --device cpu`, "
+        "`run_qwen_anchor_layer_profile_map.py --profiles medium --limit 2 --device cpu`, "
+        "`run_qwen_anchor_carryover_probe.py --profiles medium --case_name carryover_contradiction --device cpu`, "
+        "`run_qwen_anchor_concept_direction_map.py --profiles medium --limit 2 --device cpu`, "
+        "`run_qwen_future_influence_probe.py` only with a smaller model or a narrow case filter\n"
+        "- Avoid expensive all-profile rechecks unless code changed\n"
+        if cpu_mode
+        else ""
+    )
+    resolved_hint = (
+        "\n## RESOLVED PROFILE EVIDENCE\n"
+        f"- recent_profile_metrics={json.dumps(recent_profile_metrics, ensure_ascii=False)}\n"
+        "- medium is already confirmed strongest\n"
+        "- long is weak and short is negative\n"
+        "- Do NOT spend the next budget on more profile-validation reruns unless you changed the measurement code\n"
+        "- Prefer new evidence: injection-vs-legit geometry, needed layers, contradiction_proof failure mode, fastapi instability, carryover localization, future influence\n"
+        if profile_resolved
+        else ""
+    )
 
     return f"""You are an autonomous research strategist for the ABPT project.
 
@@ -560,6 +667,8 @@ Decide what experiment to run next. You have FULL FREEDOM:
 - Phase: {phase}
 - Budget remaining: {budget} experiments
 - Known facts: {known_facts}
+{cpu_hint}
+{resolved_hint}
 
 ## EXPERIMENT HISTORY (last 15)
 {history_str}
@@ -572,6 +681,7 @@ Read them yourself to understand their arguments and capabilities.
 - Scripts run on a REMOTE worker (HF Space) — they must be self-contained
 - If you write a new script, put the full code in "script_code" field
 - Budget is limited — choose experiments that maximize information gain
+- Strong preference: reuse and re-parameterize existing working scripts before inventing new ones
 
 ## WHAT TO CONSIDER
 - What hypotheses have been confirmed vs rejected?
@@ -699,7 +809,7 @@ def _call_codex(
         cmd.extend(["--sandbox", "read-only"])
     if schema is not None:
         cmd.extend(["--output-schema", str(schema_path)])
-    cmd.append(prompt)
+    cmd.append("-")
 
     print(f"[Strategist/Local] Calling codex (timeout={timeout}s)...")
     t0 = time.time()
@@ -709,6 +819,7 @@ def _call_codex(
             cmd,
             capture_output=True,
             text=True,
+            input=prompt,
             timeout=timeout,
             cwd=str(ROOT),
             encoding="utf-8",

@@ -45,3 +45,10 @@ def test_diagnostic_scripts_do_not_use_removed_numpy_trapz() -> None:
         text = path.read_text(encoding="utf-8")
         assert "np.trapz(" not in text, f"deprecated np.trapz usage remains in {path}"
         assert "np.trapezoid(" in text, f"expected np.trapezoid compatibility fix missing in {path}"
+
+
+def test_run_qwen_scripts_do_not_use_python311_only_datetime_utc_import() -> None:
+    for path in (ROOT / "scripts").glob("run_qwen_*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "from datetime import UTC, datetime" not in text, f"python3.10-incompatible UTC import remains in {path}"
+        assert "datetime.now(UTC)" not in text, f"python3.10-incompatible datetime.now(UTC) remains in {path}"

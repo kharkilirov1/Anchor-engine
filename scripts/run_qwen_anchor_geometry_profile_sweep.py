@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, is_dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import statistics
@@ -169,7 +169,7 @@ def build_markdown_report(
         "",
         "## Summary",
         "",
-        f"- Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"- Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         f"- Model: `{model_name}`",
         f"- Device: `{device}`",
         f"- Layers analyzed: `{layers[0]}..{layers[-1]}`",
@@ -329,7 +329,7 @@ def main() -> None:
     best_geometry_profile = max(profile_summaries, key=_profile_rank_key)
     payload = {
         "metadata": {
-            "created_at_utc": datetime.now(UTC).isoformat(),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "model_name": args.model,
             "device": str(device),
             "max_length": int(args.max_length),

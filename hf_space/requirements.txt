@@ -7,3 +7,4 @@ spaces
 numpy
 scipy
 einops
+matplotlib

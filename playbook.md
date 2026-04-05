@@ -116,3 +116,69 @@ Carryover = косинусное сходство между hidden state суф
 
 *Последнее обновление: 2026-04-04 (ручное)*
 *Следующее обновление: автоматически после Фазы 1 phase_probe*
+
+---
+## [2026-04-04] Эксперимент H1_cross_profile_v2: Retry cross-profile tail_retention_ratio validation across short/medium/long profiles in a single run. All 8 prior experiments returned null metrics due to infrastructure/extraction failures, not hypothesis rejection. This is the highest-value experiment: confirms or denies generalization of the strongest known signal (rho=0.64 on medium) with one run covering all 3 profiles.
+
+**Статус:** 📊 DATA COLLECTED  
+**Метрика:** `cross_profile.medium.tail_retention_rho` = `None`  
+
+---
+## [2026-04-04] Эксперимент H1_per_case_diagnostic: Minimal per-case tail_retention_ratio + constraint_score diagnostic on medium profile. Validates rho=0.64 independently and produces raw per-case data. Ultra-robust: flat output, no nested metric paths, aggressive try/except per case.
+
+**Статус:** 📊 DATA COLLECTED  
+**Метрика:** `spearman_rho` = `None`  
+
+---
+## [2026-04-04] Эксперимент infra_validate_diagnostic: Infrastructure validation via simplest script (per_case_diagnostic). All 9 prior experiments returned null metrics despite successful execution (14-62s runtime). Before spending more budget on new hypotheses, we must confirm the result extraction pipeline works. This script outputs ===FINAL_RESULT=== with flat JSON — if this also returns null, the bug is in the orchestrator's metric parser, not in experiment logic.
+
+**Статус:** 📊 DATA COLLECTED  
+**Метрика:** `spearman_rho` = `None`  
+
+---
+## [2026-04-04] Эксперимент H1_short_diagnostic: Per-case tail_retention diagnostic on SHORT anchor profile. Tests whether rho=0.64 (medium) generalizes to shorter anchors. Uses proven per_case_diagnostic approach with added --profile arg. Flat output, no nested paths, maximal robustness.
+
+**Статус:** 📊 DATA COLLECTED  
+**Метрика:** `spearman_rho` = `None`  
+
+---
+## [2026-04-05] Эксперимент H1_short_diagnostic_v2_retry: Проверить, сохраняется ли signal tail_retention_ratio на short anchor profile самым робастным flat-output скриптом, избегая тяжёлых multi-profile прогонов и nested result extraction.
+
+**Статус:** 📊 DATA COLLECTED  
+**Метрика:** `spearman_rho` = `None`  
+
+---
+## [2026-04-05] Эксперимент H1_medium_diagnostic_v2_cpu_repro: Лёгкий CPU-only repro на medium profile через flat-output diagnostic, чтобы проверить, воспроизводится ли ранее наблюдавшийся medium tail-retention signal и отличить реальный null от проблем извлечения метрики.
+
+**Статус:** ✅ CONFIRMED  
+**Метрика:** `spearman_rho` = `0.6`  
+
+---
+## [2026-04-05] Эксперимент H1_long_diagnostic_v2_cpu_compare: Проверить, сохраняется ли per-case tail-retention signal на long anchor profile, чтобы напрямую сравнить short/medium/long через самый робастный CPU-safe flat diagnostic и уточнить, действительно ли medium является оптимальным профилем.
+
+**Статус:** ❌ NOT CONFIRMED  
+**Метрика:** `spearman_rho` = `0.257143`  
+
+---
+## [2026-04-05] Эксперимент H1_short_diagnostic_v2_cpu_repro: CPU-only flat diagnostic on short anchor profile to resolve the remaining short-vs-medium uncertainty with the most robust existing script and avoid known broken geometry/injection paths.
+
+**Статус:** ❌ NOT CONFIRMED  
+**Метрика:** `spearman_rho` = `-0.3`  
+
+---
+## [2026-04-05] Эксперимент H3_injection_geometry_cpu_v1: Test whether injected (out-of-context) anchor spans produce geometrically distinguishable hidden state trajectories vs legitimate anchors. Core Phase 3 question. Uses medium profile (confirmed strongest) with minimal case cap for CPU safety.
+
+**Статус:** ✅ CONFIRMED  
+**Метрика:** `summary.detection_auc` = `1.0`  
+
+---
+## [2026-04-05] Эксперимент H7_carryover_contradiction_medium_cpu_v2: Diagnose WHY contradiction_proof case shows negative delta (anchor hurts, base=1 anchor=0 delta=-1). Run carryover probe on just this case with medium profile to see if carryover signal is absent, inverted, or misrouted to wrong layer. Previous H4 attempt returned null metric — likely infra extraction issue, not hypothesis failure.
+
+**Статус:** ❌ NOT CONFIRMED  
+**Метрика:** `summary.mean_last_token_delta` = `0.014798829881328857`  
+
+---
+## [2026-04-05] Эксперимент H3_injection_geometry_robustness_cap4: Validate injection geometry detection AUC=1.0 with 4 cases per group instead of 2. The AUC=1.0 result from H3_injection_geometry_cpu_v1 is the strongest Phase 3 finding but was tested on minimal data (cap=2). If AUC stays high with doubled sample, the injected-vs-legitimate anchor discriminator is confirmed robust. If it drops, we know the detection limit.
+
+**Статус:** ✅ CONFIRMED  
+**Метрика:** `summary.detection_auc` = `1.0`  

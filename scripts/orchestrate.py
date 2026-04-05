@@ -169,7 +169,7 @@ EXPERIMENT_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "Injection detection via geometry anomaly",
         "phase": 3,
         "script": "run_qwen_injection_geometry_probe.py",
-        "default_args": {"anchor_profile": "medium"},
+        "default_args": {"profile": "medium"},
         "output_pattern": "archive/*_injection_geometry_*.json",
         "result_key": "summary.detection_auc",
         "success_threshold": 0.7,
@@ -193,6 +193,7 @@ SCRIPT_RUNTIME_METADATA: dict[str, dict[str, Any]] = {
     "run_qwen_anchor_carryover_probe.py": {
         "model_arg": "model",
         "arg_aliases": {"anchor_profile": "profiles"},
+        "preserve_underscores": {"max_length", "neutral_components", "neutral_variance_cutoff", "case_name"},
         "canonical_output_pattern": "archive/qwen_anchor_carryover_probe.json",
         "canonical_result_key": "summary.mean_last_token_delta",
         "canonical_success_threshold": 0.02,
@@ -200,9 +201,51 @@ SCRIPT_RUNTIME_METADATA: dict[str, dict[str, Any]] = {
     "run_qwen_anchor_layer_profile_map.py": {
         "model_arg": "model",
         "arg_aliases": {"anchor_profile": "profiles"},
+        "preserve_underscores": {"max_length", "case_name"},
         "canonical_output_pattern": "archive/qwen_anchor_layer_profile_map.json",
         "canonical_result_key": "summary.trimmed_rank1_peak_layer_mean",
         "canonical_success_threshold": None,
+        "cpu_remote_defaults": {
+            "device": "cpu",
+            "profiles": ["medium"],
+            "limit": 2,
+        },
+    },
+    "run_qwen_injection_geometry_probe.py": {
+        "model_arg": "model-name",
+        "arg_aliases": {},
+        "canonical_output_pattern": "archive/qwen35_4b_injection_geometry_*.json",
+        "canonical_result_key": "summary.detection_auc",
+        "canonical_success_threshold": 0.7,
+        "cpu_remote_defaults": {
+            "device": "cpu",
+            "profile": "medium",
+            "group_case_cap": 2,
+        },
+    },
+    "run_qwen_anchor_concept_direction_map.py": {
+        "model_arg": "model",
+        "arg_aliases": {"anchor_profile": "profiles"},
+        "preserve_underscores": {"max_length", "neutral_components", "neutral_variance_cutoff", "case_name"},
+        "canonical_output_pattern": "archive/qwen_anchor_concept_direction_map.json",
+        "canonical_result_key": "summary.mean_peak_cosine",
+        "canonical_success_threshold": None,
+        "cpu_remote_defaults": {
+            "device": "cpu",
+            "profiles": ["medium"],
+            "limit": 2,
+        },
+    },
+    "run_qwen_future_influence_probe.py": {
+        "model_arg": "model",
+        "arg_aliases": {},
+        "preserve_underscores": {"max_length", "future_window", "top_k", "span_threshold", "top_spans", "case_filter"},
+        "canonical_output_pattern": "archive/qwen_future_influence_probe.json",
+        "canonical_result_key": "summary.future_influence_gap_conflict_minus_stable",
+        "canonical_success_threshold": None,
+        "cpu_remote_defaults": {
+            "device": "cpu",
+        },
     },
     "run_qwen_cross_profile_probe.py": {
         "model_arg": "model-name",
@@ -233,6 +276,17 @@ SCRIPT_RUNTIME_METADATA: dict[str, dict[str, Any]] = {
             "device": "cpu",
             "max_new_tokens": 8,
             "group_case_cap": 1,
+        },
+    },
+    "run_qwen_injection_geometry_probe.py": {
+        "model_arg": "model-name",
+        "arg_aliases": {"anchor_profile": "profile"},
+        "canonical_output_pattern": "archive/qwen35_4b_injection_geometry_*.json",
+        "canonical_result_key": "summary.detection_auc",
+        "canonical_success_threshold": 0.7,
+        "cpu_remote_defaults": {
+            "device": "cpu",
+            "profile": "medium",
         },
     },
 }
@@ -292,6 +346,17 @@ def _normalize_script_args(script_name: str, raw_args: dict[str, Any]) -> dict[s
         if target_key is None:
             continue
         normalized[target_key] = value
+    if script_name == "run_qwen_anchor_carryover_probe.py" and "case_name" in normalized:
+        carryover_aliases = {
+            "procedure_contradiction_proof": "carryover_contradiction",
+            "content_vegan_brief": "carryover_vegan",
+            "content_fastapi_architecture": "carryover_fastapi",
+            "content_json_contract": "carryover_json",
+            "procedure_binary_search_note": "carryover_binary_search",
+            "procedure_di_request_path": "carryover_di",
+        }
+        case_name = str(normalized["case_name"])
+        normalized["case_name"] = carryover_aliases.get(case_name, case_name)
     return normalized
 
 
@@ -586,13 +651,15 @@ def build_worker_command(hyp_def: dict[str, Any], state: dict[str, Any]) -> list
     script_path = SCRIPTS_DIR / script_name
     meta = SCRIPT_RUNTIME_METADATA.get(script_name, {})
     model_arg = str(meta.get("model_arg", "model"))
+    preserve_underscores = set(meta.get("preserve_underscores", set()))
     args = [sys.executable, str(script_path)]
     normalized_args = _apply_cpu_remote_defaults(
         script_name,
         _normalize_script_args(script_name, hyp_def.get("default_args", {})),
     )
     for key, val in normalized_args.items():
-        cli_key = f"--{str(key).replace('_', '-')}"
+        key_str = str(key)
+        cli_key = f"--{key_str}" if key_str in preserve_underscores else f"--{key_str.replace('_', '-')}"
         if isinstance(val, (list, tuple)):
             args.append(cli_key)
             args.extend(str(item) for item in val)
@@ -699,12 +766,42 @@ def _summarize_layer_profile_map(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _summarize_concept_direction_map(data: dict[str, Any]) -> dict[str, Any]:
+    cases = [
+        case_payload
+        for profile in data.get("profiles", [])
+        if isinstance(profile, dict)
+        for case_payload in profile.get("cases", [])
+        if isinstance(case_payload, dict)
+    ]
+    peak_layers = [
+        float(heatmap["peak_layer"])
+        for case_payload in cases
+        if isinstance((heatmap := case_payload.get("heatmap_summary")), dict)
+        and heatmap.get("peak_layer") is not None
+    ]
+    peak_cosines = [
+        float(heatmap["peak_cosine"])
+        for case_payload in cases
+        if isinstance((heatmap := case_payload.get("heatmap_summary")), dict)
+        and heatmap.get("peak_cosine") is not None
+    ]
+    return {
+        "profile_count": len(data.get("profiles", [])),
+        "case_count": len(cases),
+        "mean_peak_layer": float(sum(peak_layers) / len(peak_layers)) if peak_layers else None,
+        "mean_peak_cosine": float(sum(peak_cosines) / len(peak_cosines)) if peak_cosines else None,
+    }
+
+
 def _augment_probe_payload(data: dict[str, Any], output_name: str) -> dict[str, Any]:
     augmented = dict(data)
     if "carryover_probe" in output_name and "summary" not in augmented:
         augmented["summary"] = _summarize_carryover_probe(augmented)
     if "layer_profile_map" in output_name and "summary" not in augmented:
         augmented["summary"] = _summarize_layer_profile_map(augmented)
+    if "concept_direction_map" in output_name and "summary" not in augmented:
+        augmented["summary"] = _summarize_concept_direction_map(augmented)
     return augmented
 
 
@@ -714,6 +811,7 @@ def analyzer_parse_result(hyp_id: str, worker_output: dict[str, Any]) -> dict[st
     result_key = hyp_def.get("result_key")
 
     latest: Path | None = None
+    data: dict[str, Any] | None = None
     output_file = worker_output.get("output_file")
     if output_file:
         preferred = Path(str(output_file))
@@ -721,32 +819,37 @@ def analyzer_parse_result(hyp_id: str, worker_output: dict[str, Any]) -> dict[st
             latest = preferred
         else:
             return {"metric_value": None, "note": f"worker reported missing output file: {preferred}"}
-    if latest is None:
+    if latest is None and isinstance(worker_output.get("result_json"), dict):
+        data = dict(worker_output["result_json"])
+    if latest is None and data is None:
         pattern = hyp_def["output_pattern"].replace("archive/", "")
         matching = list(ARCHIVE_DIR.glob(pattern))
         if not matching:
             return {"metric_value": None, "note": f"no output file found for pattern: {hyp_def['output_pattern']}"}
         latest = sorted(matching, key=lambda p: p.stat().st_mtime, reverse=True)[0]
 
-    print(f"[Analyzer] Читаю: {latest.name}")
+    output_name = latest.name if latest is not None else ""
+    if latest is not None:
+        print(f"[Analyzer] Читаю: {latest.name}")
+        try:
+            data = json.loads(latest.read_text(encoding="utf-8"))
+        except Exception as e:
+            return {"metric_value": None, "note": f"JSON parse error: {e}"}
+        data = _augment_probe_payload(data, latest.name)
+    else:
+        print("[Analyzer] Использую result_json из worker_output")
 
-    try:
-        data = json.loads(latest.read_text(encoding="utf-8"))
-    except Exception as e:
-        return {"metric_value": None, "note": f"JSON parse error: {e}"}
-
-    data = _augment_probe_payload(data, latest.name)
     metric_value = _nested_get(data, result_key) if result_key else None
 
     # Собираем краткий summary
     summary: dict[str, Any] = {
-        "output_file": latest.name,
+        "output_file": output_name or None,
         "metric_key": result_key,
         "metric_value": metric_value,
     }
 
     # Специфичный парсинг для phase_probe
-    if "phase_probe" in latest.name:
+    if "phase_probe" in output_name:
         corr = data.get("correlation_summary", {})
         all_metrics = corr.get("all_metrics", {})
         summary["correlations"] = all_metrics
@@ -760,6 +863,12 @@ def analyzer_parse_result(hyp_id: str, worker_output: dict[str, Any]) -> dict[st
         summary["best_predictor"] = best_metric[0]
         summary["best_rho"] = best_metric[1]
         print(f"[Analyzer] Лучший предиктор: {best_metric[0]} (|ρ|={best_metric[1]:.3f})" if best_metric[0] else "")
+    elif "per_case_diagnostic" in output_name or result_key == "spearman_rho":
+        summary["n_valid"] = data.get("n_valid")
+        summary["n_total"] = data.get("n_total")
+        summary["profile"] = data.get("profile")
+        summary["mean_tr"] = data.get("mean_tr")
+        summary["mean_cs"] = data.get("mean_cs")
 
     return summary
 

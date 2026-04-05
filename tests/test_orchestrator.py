@@ -39,6 +39,14 @@ def test_build_worker_command_normalizes_known_script_args() -> None:
     assert "--profiles" in layer_profile_command
     assert "--anchor-profile" not in layer_profile_command
 
+    hyp_def_injection = {
+        "script": "run_qwen_injection_geometry_probe.py",
+        "default_args": {"anchor_profile": "medium"},
+    }
+    injection_command = orchestrate.build_worker_command(hyp_def_injection, state)
+    assert "--profile" in injection_command
+    assert "--anchor-profile" not in injection_command
+
 
 def test_build_worker_command_applies_cpu_remote_safe_defaults(monkeypatch) -> None:
     monkeypatch.setenv("ALLOW_CPU_SPACE", "1")
@@ -56,6 +64,33 @@ def test_build_worker_command_applies_cpu_remote_safe_defaults(monkeypatch) -> N
     assert "8" in command
     assert "--group-case-cap" in command
     assert "1" in command
+
+
+def test_build_worker_command_preserves_underscore_flags_for_selected_scripts() -> None:
+    state = {"model": "Qwen/Qwen3.5-4B"}
+
+    carryover_command = orchestrate.build_worker_command(
+        {
+            "script": "run_qwen_anchor_carryover_probe.py",
+            "default_args": {"profiles": ["medium"], "case_name": "procedure_contradiction_proof"},
+        },
+        state,
+    )
+    assert "--case_name" in carryover_command
+    assert "--case-name" not in carryover_command
+    assert "--model" in carryover_command
+
+    future_command = orchestrate.build_worker_command(
+        {
+            "script": "run_qwen_future_influence_probe.py",
+            "default_args": {"max_length": 128, "future_window": 8, "top_k": 5},
+        },
+        state,
+    )
+    assert "--max_length" in future_command
+    assert "--future_window" in future_command
+    assert "--top_k" in future_command
+    assert "--model" in future_command
 
 
 def test_strategist_select_next_skips_missing_script(monkeypatch) -> None:
@@ -203,3 +238,85 @@ def test_analyzer_parse_result_synthesizes_layer_profile_summary(
 
     assert summary["output_file"] == output_path.name
     assert abs(float(summary["metric_value"]) - 8.0) < 1e-6
+
+
+def test_analyzer_parse_result_falls_back_to_worker_result_json(monkeypatch) -> None:
+    monkeypatch.setitem(
+        orchestrate.EXPERIMENT_REGISTRY,
+        "TEST_REMOTE_DIAG",
+        {
+            "description": "test",
+            "phase": 1,
+            "script": "run_qwen_per_case_diagnostic_v2.py",
+            "default_args": {"profile": "medium"},
+            "output_pattern": "archive/*.json",
+            "result_key": "spearman_rho",
+            "success_threshold": 0.4,
+            "depends_on": [],
+        },
+    )
+
+    summary = orchestrate.analyzer_parse_result(
+        "TEST_REMOTE_DIAG",
+        {
+            "status": "success",
+            "result_json": {
+                "spearman_rho": 0.6,
+                "n_valid": 5,
+                "n_total": 6,
+                "profile": "medium",
+                "mean_tr": 3.4,
+                "mean_cs": 0.4,
+            },
+        },
+    )
+
+    assert summary["output_file"] is None
+    assert abs(float(summary["metric_value"]) - 0.6) < 1e-6
+    assert summary["profile"] == "medium"
+
+
+def test_analyzer_parse_result_synthesizes_concept_direction_summary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output_path = tmp_path / "qwen_anchor_concept_direction_map.json"
+    output_path.write_text(
+        json.dumps(
+            {
+                "profiles": [
+                    {
+                        "profile": "medium",
+                        "cases": [
+                            {"heatmap_summary": {"peak_layer": 7, "peak_cosine": 0.31}},
+                            {"heatmap_summary": {"peak_layer": 9, "peak_cosine": 0.41}},
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setitem(
+        orchestrate.EXPERIMENT_REGISTRY,
+        "TEST_CONCEPT_DIRECTION",
+        {
+            "description": "test",
+            "phase": 1,
+            "script": "run_qwen_anchor_concept_direction_map.py",
+            "default_args": {"profiles": ["medium"]},
+            "output_pattern": "archive/*.json",
+            "result_key": "summary.mean_peak_cosine",
+            "success_threshold": None,
+            "depends_on": [],
+        },
+    )
+
+    summary = orchestrate.analyzer_parse_result(
+        "TEST_CONCEPT_DIRECTION",
+        {"status": "success", "output_file": str(output_path)},
+    )
+
+    assert summary["output_file"] == output_path.name
+    assert abs(float(summary["metric_value"]) - 0.36) < 1e-6

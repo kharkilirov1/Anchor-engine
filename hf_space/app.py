@@ -26,6 +26,24 @@ INPROCESS_CACHEABLE_SCRIPTS = {
     "run_qwen_per_case_diagnostic_v2.py",
 }
 _OVERLAY_CACHE: dict[str, Any] = {}
+SCRIPT_CLI_METADATA: dict[str, dict[str, Any]] = {
+    "run_qwen_anchor_carryover_probe.py": {
+        "model_flag": "--model",
+        "preserve_underscores": {"max_length", "neutral_components", "neutral_variance_cutoff", "case_name"},
+    },
+    "run_qwen_anchor_layer_profile_map.py": {
+        "model_flag": "--model",
+        "preserve_underscores": {"max_length", "case_name"},
+    },
+    "run_qwen_anchor_concept_direction_map.py": {
+        "model_flag": "--model",
+        "preserve_underscores": {"max_length", "neutral_components", "neutral_variance_cutoff", "case_name"},
+    },
+    "run_qwen_future_influence_probe.py": {
+        "model_flag": "--model",
+        "preserve_underscores": {"max_length", "future_window", "top_k", "span_threshold", "top_spans", "case_filter"},
+    },
+}
 
 
 def _default_device() -> str:
@@ -64,10 +82,13 @@ def _build_cpu_quant_kwargs(device: str | None) -> tuple[dict[str, Any], str | N
         return {}, f"cpu_quant_init_failed: {exc}"
 
 
-def _build_cli_args(args: dict[str, Any]) -> list[str]:
+def _build_cli_args(script: str, args: dict[str, Any]) -> list[str]:
     cli_args: list[str] = []
+    meta = SCRIPT_CLI_METADATA.get(script, {})
+    preserve_underscores = set(meta.get("preserve_underscores", set()))
     for key, val in args.items():
-        cli_key = f"--{key.replace('_', '-')}"
+        key_str = str(key)
+        cli_key = f"--{key_str}" if key_str in preserve_underscores else f"--{key_str.replace('_', '-')}"
         if isinstance(val, (list, tuple)):
             cli_args.append(cli_key)
             cli_args.extend(str(item) for item in val)
@@ -157,7 +178,8 @@ def _run_inprocess_cached(
             extra_kwargs=kwargs,
         )
 
-    cli_args = [str(script_path), *_build_cli_args(args), "--model-name", model]
+    model_flag = str(SCRIPT_CLI_METADATA.get(script, {}).get("model_flag", "--model-name"))
+    cli_args = [str(script_path), *_build_cli_args(script, args), model_flag, model]
     returncode = 0
     t0 = time.time()
     try:
@@ -241,7 +263,8 @@ def run_experiment(request_json: str) -> str:
             return json.dumps({"status": "error", "stderr_tail": f"in-process runner failed: {e}"})
 
     # Build command
-    cmd = [sys.executable, str(script_path), *_build_cli_args(args), "--model-name", model]
+    model_flag = str(SCRIPT_CLI_METADATA.get(script, {}).get("model_flag", "--model-name"))
+    cmd = [sys.executable, str(script_path), *_build_cli_args(script, args), model_flag, model]
 
     print(f"[Worker] Running: {' '.join(cmd)}")
     t0 = time.time()
@@ -308,6 +331,20 @@ def _extract_result_json(stdout: str, stderr: str) -> dict[str, Any] | None:
                     return json.loads(p.read_text(encoding="utf-8"))
                 except Exception:
                     pass
+    marker = "===FINAL_RESULT==="
+    marker_index = combined.rfind(marker)
+    if marker_index >= 0:
+        tail = combined[marker_index + len(marker):].strip()
+        decoder = json.JSONDecoder()
+        for i, ch in enumerate(tail):
+            if ch not in "{[":
+                continue
+            try:
+                payload, _ = decoder.raw_decode(tail[i:])
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                return payload
     return None
 
 

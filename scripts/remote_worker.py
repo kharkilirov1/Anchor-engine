@@ -169,10 +169,11 @@ def remote_worker_run(
     print(f"[RemoteWorker] status={result.get('status')}, elapsed={result.get('elapsed_seconds')}s")
 
     # Save result_json locally
+    output_file = None
     if result.get("result_json"):
-        _save_result_locally(script, result["result_json"])
+        output_file = _save_result_locally(script, result["result_json"])
 
-    result.setdefault("output_file", None)
+    result["output_file"] = output_file
     return result
 
 
@@ -251,7 +252,7 @@ def _sync_script_to_space(script: str) -> None:
         print(f"[RemoteWorker] Sync error: {e}")
 
 
-def _save_result_locally(script: str, result_json: dict) -> None:
+def _save_result_locally(script: str, result_json: dict) -> str:
     archive_dir = Path(__file__).resolve().parents[1] / "archive"
     archive_dir.mkdir(exist_ok=True)
 
@@ -260,3 +261,4 @@ def _save_result_locally(script: str, result_json: dict) -> None:
     out_path = archive_dir / f"{name}_{ts}_remote.json"
     out_path.write_text(json.dumps(result_json, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"[RemoteWorker] Result saved: {out_path}")
+    return str(out_path)

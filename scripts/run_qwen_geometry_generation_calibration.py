@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, replace
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
@@ -1079,7 +1079,7 @@ def build_markdown_report(
         "",
         "## Summary",
         "",
-        f"- Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"- Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         f"- Model: `{model_name}`",
         f"- Device: `{device}`",
         f"- n_cases: `{len(cases)}`",
@@ -1359,7 +1359,7 @@ def main() -> None:
             best_candidate = dict(search_result["candidate"])
             payload = {
                 "metadata": {
-                    "created_at_utc": datetime.now(UTC).isoformat(),
+                    "created_at_utc": datetime.now(timezone.utc).isoformat(),
                     "model_name": args.model,
                     "device": args.device,
                     "max_length": args.max_length,
@@ -1396,7 +1396,7 @@ def main() -> None:
     best_candidate = dict(search_result["candidate"])
     payload = {
         "metadata": {
-            "created_at_utc": datetime.now(UTC).isoformat(),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "model_name": args.model,
             "device": args.device,
             "max_length": args.max_length,

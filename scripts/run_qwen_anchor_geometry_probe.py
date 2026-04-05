@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
@@ -1088,7 +1088,7 @@ def main() -> None:
     interpretation = infer_overall_interpretation(aggregate)
     payload = {
         "metadata": {
-            "created_at_utc": datetime.now(UTC).isoformat(),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "model_name": args.model_name,
             "device": str(device),
             "max_length": int(args.max_length),

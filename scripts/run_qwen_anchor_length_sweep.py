@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -151,7 +151,7 @@ def build_length_sweep_markdown(
         "",
         "## Summary",
         "",
-        f"- Date: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}",
+        f"- Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
         f"- Model: `{model_name}`",
         f"- Device: `{device}`",
         f"- Profiles: `{[summary['profile'] for summary in profile_summaries]}`",
@@ -335,7 +335,7 @@ def main() -> None:
     )
     payload = {
         "metadata": {
-            "created_at_utc": datetime.now(UTC).isoformat(),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "model_name": args.model,
             "device": args.device,
             "max_length": args.max_length,

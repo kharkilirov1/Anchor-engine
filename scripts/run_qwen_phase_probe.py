@@ -30,7 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -495,7 +495,7 @@ def run(
             "max_length": MAX_LENGTH,
             "max_new_tokens": MAX_NEW_TOKENS,
             "crystallization_zone": [CRYSTALLIZATION_START, CRYSTALLIZATION_END],
-            "created_at_utc": datetime.now(UTC).isoformat(),
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
         },
         "correlation_summary": {
             "spearman_early_slope_4_8_vs_base_constraint": rho,

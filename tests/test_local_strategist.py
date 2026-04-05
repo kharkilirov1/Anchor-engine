@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from scripts import local_strategist
 
@@ -79,3 +80,39 @@ def test_local_strategist_falls_back_from_codex_to_claude(monkeypatch) -> None:
     assert proposal is not None
     assert proposal["id"] == "fallback_probe"
     assert call_order == ["codex", "claude"]
+
+
+def test_call_codex_passes_prompt_via_stdin(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(local_strategist, "ROOT", tmp_path)
+    monkeypatch.setattr(local_strategist.shutil, "which", lambda _: "codex")
+
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["input"] = kwargs.get("input")
+        return SimpleNamespace(returncode=0, stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(local_strategist.subprocess, "run", fake_run)
+
+    output = local_strategist._call_codex("very long prompt", timeout=1)
+
+    assert output == '{"ok": true}'
+    assert captured["cmd"][-1] == "-"
+    assert captured["input"] == "very long prompt"
+
+
+def test_profile_comparison_resolved_detects_medium_winner() -> None:
+    state = {
+        "phases": {
+            "1": {
+                "experiments": [
+                    {"hypothesis_id": "H1_medium_diagnostic_v2_cpu_repro", "metric_value": 0.6},
+                    {"hypothesis_id": "H1_long_diagnostic_v2_cpu_compare", "metric_value": 0.257143},
+                    {"hypothesis_id": "H1_short_diagnostic_v2_cpu_repro", "metric_value": -0.3},
+                ]
+            }
+        }
+    }
+
+    assert local_strategist._profile_comparison_resolved(state) is True
