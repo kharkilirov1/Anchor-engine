@@ -36,6 +36,7 @@ def _case(
 
 
 ANCHOR_TEXT_BY_GROUP: dict[str, dict[str, str]] = {
+    # --- existing groups ---
     "strictly_vegan_meal_plan_policy": {
         "short": "vegan meal plan policy",
         "medium": "strictly vegan meal plan policy",
@@ -65,6 +66,47 @@ ANCHOR_TEXT_BY_GROUP: dict[str, dict[str, str]] = {
         "short": "injection request flow sequence",
         "medium": "dependency injection request flow sequence",
         "long": "dependency injection request flow sequence in a web service",
+    },
+    # --- new groups: rare/ambiguous/cross-domain ---
+    "penicillin_allergy_treatment_protocol": {
+        "short": "allergy treatment protocol",
+        "medium": "penicillin allergy treatment protocol",
+        "long": "penicillin allergy treatment protocol for the patient",
+    },
+    "gdpr_data_retention_compliance_policy": {
+        "short": "data retention compliance policy",
+        "medium": "GDPR data retention compliance policy",
+        "long": "GDPR data retention compliance policy for all user records",
+    },
+    "mathematical_induction_proof_steps": {
+        "short": "induction proof steps",
+        "medium": "mathematical induction proof steps",
+        "long": "mathematical induction proof steps for the inequality",
+    },
+    "sql_foreign_key_constraint_enforcement": {
+        "short": "foreign key constraint enforcement",
+        "medium": "SQL foreign key constraint enforcement",
+        "long": "SQL foreign key constraint enforcement on every table",
+    },
+    "thread_safe_singleton_initialization_pattern": {
+        "short": "singleton initialization pattern",
+        "medium": "thread-safe singleton initialization pattern",
+        "long": "thread-safe singleton initialization pattern with double-checked locking",
+    },
+    "idempotent_rest_api_retry_policy": {
+        "short": "API retry policy",
+        "medium": "idempotent REST API retry policy",
+        "long": "idempotent REST API retry policy for every write endpoint",
+    },
+    "recursive_tree_traversal_procedure": {
+        "short": "tree traversal procedure",
+        "medium": "recursive tree traversal procedure",
+        "long": "recursive tree traversal procedure on a binary tree",
+    },
+    "strict_typescript_null_safety_policy": {
+        "short": "null safety policy",
+        "medium": "strict TypeScript null safety policy",
+        "long": "strict TypeScript null safety policy across the codebase",
     },
 }
 
@@ -282,5 +324,279 @@ def make_qwen_anchor_geometry_cases(
                 "request resolution, and handler invocation."
             ),
             description="Open-ended onboarding summary anchored to the same DI flow.",
+        ),
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW: medical domain (rare, high-constraint, likely flat)
+        # ─────────────────────────────────────────────────────────────────────
+        _case(
+            name="content_allergy_prescription",
+            anchor_class="content_like",
+            anchor_group="penicillin_allergy_treatment_protocol",
+            anchor_text=_anchor_text_for_profile(
+                "penicillin_allergy_treatment_protocol",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The chart specifies a penicillin allergy treatment protocol for the patient. "
+                "Write a brief clinical note listing safe antibiotic alternatives, "
+                "emphasizing that penicillin and amoxicillin must be avoided. "
+                "Do not recommend any beta-lactam antibiotics."
+            ),
+            description="Medical constraint: avoid penicillin-class drugs.",
+        ),
+        _case(
+            name="content_allergy_discharge",
+            anchor_class="content_like",
+            anchor_group="penicillin_allergy_treatment_protocol",
+            anchor_text=_anchor_text_for_profile(
+                "penicillin_allergy_treatment_protocol",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The chart specifies a penicillin allergy treatment protocol for the patient. "
+                "Write discharge instructions for the patient explaining which medications to avoid "
+                "and what to tell future healthcare providers about the allergy."
+            ),
+            description="Patient-facing discharge note under penicillin allergy constraint.",
+        ),
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW: legal/GDPR domain (rare, content-like, likely flat)
+        # ─────────────────────────────────────────────────────────────────────
+        _case(
+            name="content_gdpr_retention",
+            anchor_class="content_like",
+            anchor_group="gdpr_data_retention_compliance_policy",
+            anchor_text=_anchor_text_for_profile(
+                "gdpr_data_retention_compliance_policy",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The system enforces a GDPR data retention compliance policy for all user records. "
+                "Write a technical note for the engineering team explaining how personal data must be "
+                "deleted or anonymized after the retention period, and what audit logs must be kept."
+            ),
+            description="GDPR data retention constraint for engineering audience.",
+        ),
+        _case(
+            name="content_gdpr_user_notice",
+            anchor_class="content_like",
+            anchor_group="gdpr_data_retention_compliance_policy",
+            anchor_text=_anchor_text_for_profile(
+                "gdpr_data_retention_compliance_policy",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The system enforces a GDPR data retention compliance policy for all user records. "
+                "Write a user-facing privacy notice explaining how long their data is stored, "
+                "their right to erasure, and how to request deletion. Keep it plain language."
+            ),
+            description="User-facing GDPR notice under data retention policy.",
+        ),
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW: mathematical induction (procedure, tests math beyond contradiction)
+        # ─────────────────────────────────────────────────────────────────────
+        _case(
+            name="procedure_induction_sum",
+            anchor_class="procedure_like",
+            anchor_group="mathematical_induction_proof_steps",
+            anchor_text=_anchor_text_for_profile(
+                "mathematical_induction_proof_steps",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The proof uses mathematical induction proof steps for the inequality "
+                "1 + 2 + ... + n = n(n+1)/2. "
+                "Write the base case, inductive hypothesis, and inductive step explicitly. "
+                "Do not use any method other than induction."
+            ),
+            description="Standard induction proof anchored to sum formula.",
+        ),
+        _case(
+            name="procedure_induction_inequality",
+            anchor_class="procedure_like",
+            anchor_group="mathematical_induction_proof_steps",
+            anchor_text=_anchor_text_for_profile(
+                "mathematical_induction_proof_steps",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The proof uses mathematical induction proof steps for the inequality "
+                "2^n > n for all n >= 1. "
+                "State the base case, assume P(k), and derive P(k+1). "
+                "Keep the argument self-contained and do not switch to a different proof technique."
+            ),
+            description="Induction proof for exponential inequality.",
+        ),
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW: SQL constraints (content-like, cross-domain DB+code)
+        # ─────────────────────────────────────────────────────────────────────
+        _case(
+            name="content_sql_fk_design",
+            anchor_class="content_like",
+            anchor_group="sql_foreign_key_constraint_enforcement",
+            anchor_text=_anchor_text_for_profile(
+                "sql_foreign_key_constraint_enforcement",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The database schema requires SQL foreign key constraint enforcement on every table. "
+                "Write a design note explaining how referential integrity is maintained, "
+                "what happens on DELETE CASCADE vs RESTRICT, and why orphan rows must be prevented."
+            ),
+            description="DB design note anchored to FK constraint enforcement.",
+        ),
+        _case(
+            name="content_sql_fk_migration",
+            anchor_class="content_like",
+            anchor_group="sql_foreign_key_constraint_enforcement",
+            anchor_text=_anchor_text_for_profile(
+                "sql_foreign_key_constraint_enforcement",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The database schema requires SQL foreign key constraint enforcement on every table. "
+                "Write a migration guide for adding foreign keys to an existing schema with legacy data. "
+                "Cover how to handle orphan rows before enabling constraints."
+            ),
+            description="Migration guide under FK constraint policy.",
+        ),
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW: thread safety (procedure, concurrency domain)
+        # ─────────────────────────────────────────────────────────────────────
+        _case(
+            name="procedure_singleton_impl",
+            anchor_class="procedure_like",
+            anchor_group="thread_safe_singleton_initialization_pattern",
+            anchor_text=_anchor_text_for_profile(
+                "thread_safe_singleton_initialization_pattern",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The design document specifies a thread-safe singleton initialization pattern "
+                "with double-checked locking. "
+                "Write a step-by-step explanation of why naive singleton fails under concurrency, "
+                "how double-checked locking solves it, and what role volatile/memory barriers play. "
+                "Do not switch to dependency injection or static initialization."
+            ),
+            description="Thread-safe singleton procedure with concurrency focus.",
+        ),
+        _case(
+            name="procedure_singleton_test",
+            anchor_class="procedure_like",
+            anchor_group="thread_safe_singleton_initialization_pattern",
+            anchor_text=_anchor_text_for_profile(
+                "thread_safe_singleton_initialization_pattern",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The design document specifies a thread-safe singleton initialization pattern "
+                "with double-checked locking. "
+                "Write a short note on how to test this pattern: what race conditions to simulate, "
+                "how many threads to spawn, and what assertions verify correctness."
+            ),
+            description="Testing strategy for thread-safe singleton.",
+        ),
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW: REST idempotency (content, API domain)
+        # ─────────────────────────────────────────────────────────────────────
+        _case(
+            name="content_idempotent_design",
+            anchor_class="content_like",
+            anchor_group="idempotent_rest_api_retry_policy",
+            anchor_text=_anchor_text_for_profile(
+                "idempotent_rest_api_retry_policy",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The API specification mandates an idempotent REST API retry policy for every write endpoint. "
+                "Write a design note explaining idempotency keys, how retries are safe under this policy, "
+                "and what happens when a duplicate request arrives. "
+                "Do not describe non-idempotent fire-and-forget patterns."
+            ),
+            description="Idempotent API design note.",
+        ),
+        _case(
+            name="content_idempotent_client",
+            anchor_class="content_like",
+            anchor_group="idempotent_rest_api_retry_policy",
+            anchor_text=_anchor_text_for_profile(
+                "idempotent_rest_api_retry_policy",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The API specification mandates an idempotent REST API retry policy for every write endpoint. "
+                "Write a client integration guide explaining how to generate idempotency keys, "
+                "when to retry, and how to handle 409 Conflict responses."
+            ),
+            description="Client-facing idempotency guide.",
+        ),
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW: recursive traversal (procedure, algorithmic)
+        # ─────────────────────────────────────────────────────────────────────
+        _case(
+            name="procedure_recursive_inorder",
+            anchor_class="procedure_like",
+            anchor_group="recursive_tree_traversal_procedure",
+            anchor_text=_anchor_text_for_profile(
+                "recursive_tree_traversal_procedure",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The algorithm note uses a recursive tree traversal procedure on a binary tree. "
+                "Describe the in-order traversal step by step: when the left subtree is visited, "
+                "when the node value is recorded, and when the right subtree is visited. "
+                "Do not switch to iterative traversal with an explicit stack."
+            ),
+            description="Recursive in-order traversal procedure.",
+        ),
+        _case(
+            name="procedure_recursive_depth",
+            anchor_class="procedure_like",
+            anchor_group="recursive_tree_traversal_procedure",
+            anchor_text=_anchor_text_for_profile(
+                "recursive_tree_traversal_procedure",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The algorithm note uses a recursive tree traversal procedure on a binary tree. "
+                "Write a brief note on computing tree depth recursively: "
+                "what the base case returns, how left and right depths combine, "
+                "and why the recursion terminates."
+            ),
+            description="Recursive depth computation on binary tree.",
+        ),
+        # ─────────────────────────────────────────────────────────────────────
+        # NEW: TypeScript strict null (content, type-system domain)
+        # ─────────────────────────────────────────────────────────────────────
+        _case(
+            name="content_ts_null_safety",
+            anchor_class="content_like",
+            anchor_group="strict_typescript_null_safety_policy",
+            anchor_text=_anchor_text_for_profile(
+                "strict_typescript_null_safety_policy",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The project enforces a strict TypeScript null safety policy across the codebase. "
+                "Write a developer guide explaining strictNullChecks, how to handle optional values "
+                "with narrowing and assertion functions, and why `any` and `!` operator are banned. "
+                "Keep examples in TypeScript only."
+            ),
+            description="TypeScript null safety developer guide.",
+        ),
+        _case(
+            name="content_ts_null_review",
+            anchor_class="content_like",
+            anchor_group="strict_typescript_null_safety_policy",
+            anchor_text=_anchor_text_for_profile(
+                "strict_typescript_null_safety_policy",
+                anchor_span_profile,
+            ),
+            prompt=(
+                "The project enforces a strict TypeScript null safety policy across the codebase. "
+                "Write a code review checklist for catching null safety violations: "
+                "what patterns to flag, how to suggest fixes, and when exceptions are acceptable."
+            ),
+            description="Code review checklist under null safety policy.",
         ),
     ]

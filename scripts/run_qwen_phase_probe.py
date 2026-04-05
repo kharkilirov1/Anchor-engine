@@ -120,6 +120,63 @@ KEYWORD_SPECS: dict[str, dict[str, Any]] = {
         "negative_exceptions": {},
         "min_unique_positive_hits": 2,
     },
+    "penicillin_allergy_treatment_protocol": {
+        "positive": ["allergy", "alternative", "azithromycin", "fluoroquinolone",
+                     "avoid", "antibiotic"],
+        "negative": ["penicillin", "amoxicillin", "ampicillin"],
+        "negative_exceptions": {"penicillin": ["penicillin allergy", "allergic to penicillin",
+                                               "avoid penicillin", "no penicillin"]},
+        "min_unique_positive_hits": 2,
+    },
+    "gdpr_data_retention_compliance_policy": {
+        "positive": ["retention", "delete", "anonymiz", "erasure", "gdpr",
+                     "personal data", "right to"],
+        "negative": ["sell data", "share with third parties without consent"],
+        "negative_exceptions": {},
+        "min_unique_positive_hits": 2,
+    },
+    "mathematical_induction_proof_steps": {
+        "positive": ["base case", "inductive", "induction", "P(k)",
+                     "P(k+1)", "assume", "hypothesis"],
+        "negative": ["contradiction", "contrapositive"],
+        "negative_exceptions": {},
+        "min_unique_positive_hits": 2,
+    },
+    "sql_foreign_key_constraint_enforcement": {
+        "positive": ["foreign key", "referential", "constraint", "cascade",
+                     "references", "integrity"],
+        "negative": ["nosql", "mongodb", "schemaless"],
+        "negative_exceptions": {},
+        "min_unique_positive_hits": 2,
+    },
+    "thread_safe_singleton_initialization_pattern": {
+        "positive": ["thread", "singleton", "lock", "volatile", "synchronized",
+                     "double-check", "concurrent"],
+        "negative": ["global variable", "static init only"],
+        "negative_exceptions": {},
+        "min_unique_positive_hits": 2,
+    },
+    "idempotent_rest_api_retry_policy": {
+        "positive": ["idempoten", "retry", "idempotency key", "duplicate",
+                     "safe to retry", "409"],
+        "negative": ["fire and forget", "at-most-once without retry"],
+        "negative_exceptions": {},
+        "min_unique_positive_hits": 2,
+    },
+    "recursive_tree_traversal_procedure": {
+        "positive": ["recursive", "traversal", "left", "right", "node",
+                     "base case", "subtree"],
+        "negative": ["iterative", "explicit stack", "while loop"],
+        "negative_exceptions": {},
+        "min_unique_positive_hits": 2,
+    },
+    "strict_typescript_null_safety_policy": {
+        "positive": ["null", "undefined", "strictnullcheck", "narrowing",
+                     "optional", "typescript", "type guard"],
+        "negative": ["any", "as any"],
+        "negative_exceptions": {"any": ["not any", "without any", "avoid any"]},
+        "min_unique_positive_hits": 2,
+    },
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
