@@ -259,8 +259,9 @@ def run_experiment(request_json: str) -> str:
     script = req.get("script", "")
     args = dict(req.get("args", {}))
     model = req.get("model", "Qwen/Qwen3.5-4B")
-    timeout = min(req.get("timeout", 300), 300)  # ZeroGPU max ~300s
+    timeout = min(req.get("timeout", 580), 580)  # ZeroGPU duration=600, keep margin
     args.setdefault("device", _default_device())
+    os.environ.setdefault("ATTN_IMPL", "sdpa")  # save VRAM on ZeroGPU
 
     script_path = SCRIPTS_DIR / script
     if not script_path.exists():
