@@ -16,6 +16,7 @@ import argparse
 from dataclasses import replace
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -398,7 +399,7 @@ def main() -> None:
         cfg=cfg,
         device=args.device,
         torch_dtype=torch.float16 if "cuda" in args.device else None,
-        attn_implementation="eager",  # required for output_attentions=True
+        attn_implementation=os.environ.get("ATTN_IMPL", "eager"),  # eager for attentions, sdpa for VRAM savings
     )
     overlay.eval()
 
