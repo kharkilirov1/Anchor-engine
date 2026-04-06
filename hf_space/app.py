@@ -34,7 +34,7 @@ SCRIPT_CLI_METADATA: dict[str, dict[str, Any]] = {
             "repetition_penalty", "frequency_penalty", "no_repeat_ngram_size",
             "max_bias_gate_sum", "entropy_top_k", "entropy_threshold",
             "entropy_slope", "pressure_threshold", "pressure_slope",
-            "pressure_rescue_floor", "mature_r1_threshold", "template_delta_threshold",
+            "pressure_rescue_floor", "mature_r1_threshold", "template_delta_threshold", "r1_ceiling",
             "output_dir",
         },
     },

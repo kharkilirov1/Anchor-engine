@@ -369,6 +369,8 @@ def main() -> None:
     parser.add_argument("--pressure_rescue_floor", type=float, default=0.20)
     parser.add_argument("--mature_r1_threshold", type=float, default=0.65)
     parser.add_argument("--template_delta_threshold", type=float, default=0.08)
+    parser.add_argument("--r1_ceiling", type=float, default=None,
+                        help="Override r1_ceiling for H6 continuous bias (default: max observed r1)")
     parser.add_argument("--domains", type=str, default="all")
     parser.add_argument(
         "--output_dir", type=Path,
@@ -458,7 +460,10 @@ def main() -> None:
     print(f"{'='*60}")
 
     # r1_ceiling for H6 continuous bias: max observed r1 (at ceiling → bias=0)
-    r1_ceiling = max(r1_values) if r1_values else 0.40
+    if args.r1_ceiling is not None:
+        r1_ceiling = args.r1_ceiling
+    else:
+        r1_ceiling = max(r1_values) if r1_values else 0.40
 
     for geo in geometries:
         if not geo.get("matched"):
