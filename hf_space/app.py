@@ -239,7 +239,18 @@ def _run_inprocess_cached(
     }
 
 
-@spaces.GPU(duration=600)  # до 10 минут GPU на один вызов
+def _gpu_decorator(fn):
+    """Apply @spaces.GPU only when ZeroGPU is available."""
+    try:
+        import torch
+        if torch.cuda.is_available() or os.environ.get("SPACES_ZERO_GPU"):
+            return spaces.GPU(duration=600)(fn)
+    except Exception:
+        pass
+    return fn
+
+
+@_gpu_decorator
 def run_experiment(request_json: str) -> str:
     """
     Запускает эксперимент на GPU. Принимает и возвращает JSON строки.
@@ -259,7 +270,8 @@ def run_experiment(request_json: str) -> str:
     script = req.get("script", "")
     args = dict(req.get("args", {}))
     model = req.get("model", "Qwen/Qwen3.5-4B")
-    timeout = min(req.get("timeout", 580), 580)  # ZeroGPU duration=600, keep margin
+    max_timeout = 580 if os.environ.get("SPACES_ZERO_GPU") else 7200  # 580s GPU, 2h CPU
+    timeout = min(req.get("timeout", max_timeout), max_timeout)
     args.setdefault("device", _default_device())
     os.environ.setdefault("ATTN_IMPL", "sdpa")  # save VRAM on ZeroGPU
 
