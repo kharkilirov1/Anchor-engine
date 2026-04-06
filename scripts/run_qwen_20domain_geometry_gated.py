@@ -256,16 +256,23 @@ def run_gated_domain(
     base_time = time.time() - t0
     print(f"  [BASE] done in {base_time:.1f}s")
 
-    # Run ANCHOR only if route says so
-    if route == "anchor":
+    # H6: continuous bias — scale strength by geometry instead of binary gate
+    r1_ref = geometry.get("r1_reference")
+    r1_ceiling = geometry.get("r1_ceiling", 0.40)
+    if r1_ref is not None:
+        continuous_scale = bias_scale * max(0.0, 1.0 - r1_ref / r1_ceiling)
+    else:
+        continuous_scale = bias_scale  # no geometry → full bias
+
+    if continuous_scale > 0.01:
         t0 = time.time()
-        print("  [ANCHOR] generating (geometry says: INTERVENE)...")
+        print(f"  [ANCHOR] generating (continuous bias_scale={continuous_scale:.3f})...")
         anchor = overlay.generate_with_anchor_bias(
             prompt=domain.prompt,
             max_new_tokens=effective_tokens,
             max_length=max_length,
             conflict_threshold=conflict_threshold,
-            bias_scale=bias_scale,
+            bias_scale=continuous_scale,
             greedy=True,
             repetition_penalty=repetition_penalty,
             frequency_penalty=frequency_penalty,
@@ -287,7 +294,7 @@ def run_gated_domain(
         print(f"  [ANCHOR] done in {anchor_time:.1f}s")
         chosen = "anchor"
     else:
-        print(f"  [SKIP ANCHOR] geometry says: model can handle it ({cluster})")
+        print(f"  [SKIP ANCHOR] bias_scale={continuous_scale:.4f} ≈ 0 ({cluster})")
         anchor_text = base["continuation_text"]
         anchor_tokens = base["num_tokens"]
         anchor_time = 0.0
@@ -317,7 +324,9 @@ def run_gated_domain(
         "cluster": cluster,
         "route": route,
         "chosen": chosen,
+        "continuous_bias_scale": round(continuous_scale, 4),
         "r1_reference": geometry.get("r1_reference"),
+        "r1_ceiling": r1_ceiling,
         "delta_template_pair": geometry.get("delta_template_pair"),
         "base_continuation": base["continuation_text"][:2000],
         "chosen_continuation": chosen_text[:2000],
@@ -447,11 +456,15 @@ def main() -> None:
     print("  PHASE 1b: Classification (calibrated thresholds)")
     print(f"{'='*60}")
 
+    # r1_ceiling for H6 continuous bias: max observed r1 (at ceiling → bias=0)
+    r1_ceiling = max(r1_values) if r1_values else 0.40
+
     for geo in geometries:
         if not geo.get("matched"):
             continue
         r1_ref = geo.get("r1_reference")
         delta_tpl = geo.get("delta_template_pair")
+        geo["r1_ceiling"] = r1_ceiling
         if r1_ref is not None and r1_ref > cal_r1:
             geo["cluster"] = "mature"
             geo["route"] = "base"
@@ -462,12 +475,19 @@ def main() -> None:
             geo["cluster"] = "flat"
             geo["route"] = "anchor"
 
+    print(f"  r1_ceiling (max observed): {r1_ceiling:.3f}")
+    print(f"  bias_scale formula: {args.bias_scale:.2f} * max(0, 1 - r1/{r1_ceiling:.3f})")
+    print()
+
     for domain, geo in zip(domains, geometries):
         cluster = geo.get("cluster", "?")
-        route = geo.get("route", "?")
         r1 = geo.get("r1_reference")
         r1_s = f"{r1:.3f}" if r1 is not None else "N/A"
-        print(f"  {domain.name:<35} cluster={cluster:<10} r1={r1_s:<8} route={route}")
+        if r1 is not None:
+            cs = args.bias_scale * max(0.0, 1.0 - r1 / r1_ceiling)
+        else:
+            cs = args.bias_scale
+        print(f"  {domain.name:<35} cluster={cluster:<10} r1={r1_s:<8} bias={cs:.3f}")
 
     n_flat = sum(1 for g in geometries if g.get("cluster") == "flat")
     n_mature = sum(1 for g in geometries if g.get("cluster") == "mature")
