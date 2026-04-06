@@ -116,11 +116,17 @@ Carryover = косинусное сходство между hidden state суф
 
 ## 20-Domain Geometry-Gated Campaign (2026-04-05)
 
-### Результаты (hardcoded thresholds, attention-based spans)
-- 20 доменов, Qwen/Qwen3.5-4B, GPU T4
-- r1 range: 0.199–0.340 — **ни одного mature** кластера при пороге 0.65
-- С hardcoded: flat=17, template=3 → anchor wins 4/17, losses 13/17
-- С auto-calibrated (k-means): flat=7, mature=9, template=4 → прогон в процессе
+### Результаты (attention-based spans, Qwen/Qwen3.5-4B, GPU T4)
+
+| Режим | flat | mature | template | Anchor invoked | Wins | LOSS | Время |
+|-------|------|--------|----------|----------------|------|------|-------|
+| Hardcoded (0.65/0.08) | 17 | 0 | 3 | 17/20 | 4 | **13** | 56 мин |
+| **Auto-calibrated (k-means)** | 7 | 9 | 4 | 7/20 | 1 | **6** | 39 мин |
+| Без гейтинга | — | — | — | 20/20 | — | **14** | ~60 мин |
+
+Auto-calibrated пороги: mature_r1 0.650→0.238, template_delta 0.080→0.054
+
+**Итог:** auto-calibration снизила LOSS с 14 до 6 (−57%), отсекла тяжёлые провалы (formal −39.7, minimalist −26.1, typescript −22.3). Потеряны 3 wins (fastapi +27.2, proof +3.0, drug_free +2.2).
 
 ### Ключевой вывод
 - Binary gating (apply/skip anchor) — **неэффективен** для 4B модели
