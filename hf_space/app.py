@@ -239,7 +239,7 @@ def _run_inprocess_cached(
     }
 
 
-@spaces.GPU(duration=300)  # до 5 минут GPU на один вызов
+@spaces.GPU(duration=600)  # до 10 минут GPU на один вызов
 def run_experiment(request_json: str) -> str:
     """
     Запускает эксперимент на GPU. Принимает и возвращает JSON строки.
