@@ -27,6 +27,27 @@ INPROCESS_CACHEABLE_SCRIPTS = {
 }
 _OVERLAY_CACHE: dict[str, Any] = {}
 SCRIPT_CLI_METADATA: dict[str, dict[str, Any]] = {
+    "run_qwen_20domain_geometry_gated.py": {
+        "model_flag": "--model",
+        "preserve_underscores": {
+            "max_new_tokens", "max_length", "conflict_threshold", "bias_scale",
+            "repetition_penalty", "frequency_penalty", "no_repeat_ngram_size",
+            "max_bias_gate_sum", "entropy_top_k", "entropy_threshold",
+            "entropy_slope", "pressure_threshold", "pressure_slope",
+            "pressure_rescue_floor", "mature_r1_threshold", "template_delta_threshold",
+            "output_dir",
+        },
+    },
+    "run_qwen_20domain_retention_campaign.py": {
+        "model_flag": "--model",
+        "preserve_underscores": {
+            "max_new_tokens", "max_length", "bias_scale", "conflict_threshold",
+            "repetition_penalty", "frequency_penalty", "no_repeat_ngram_size",
+            "max_bias_gate_sum", "entropy_top_k", "entropy_threshold",
+            "entropy_slope", "pressure_threshold", "pressure_slope",
+            "pressure_rescue_floor", "output_dir",
+        },
+    },
     "run_qwen_anchor_carryover_probe.py": {
         "model_flag": "--model",
         "preserve_underscores": {"max_length", "neutral_components", "neutral_variance_cutoff", "case_name"},
