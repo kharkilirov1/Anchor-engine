@@ -60,6 +60,8 @@ def eval_accuracy(
     total_loss = 0.0
     correct = 0
     total = 0
+    seq_correct = 0
+    seq_total = 0
     n_batches = 0
     for batch in loader:
         input_ids = batch["input_ids"].to(device)
@@ -72,11 +74,17 @@ def eval_accuracy(
         n_batches += 1
 
         preds = out["logits"].argmax(dim=-1)
-        # accuracy only on masked (target) positions
         if loss_mask is not None:
             m = loss_mask.bool()
             correct += (preds[m] == targets[m]).sum().item()
             total += m.sum().item()
+            # exact match per sequence
+            for b in range(preds.size(0)):
+                mb = m[b]
+                if mb.any():
+                    seq_total += 1
+                    if torch.equal(preds[b][mb], targets[b][mb]):
+                        seq_correct += 1
         else:
             for i in range(input_ids.size(0)):
                 sep_positions = (input_ids[i] == sep_token).nonzero(as_tuple=True)[0]
@@ -87,10 +95,14 @@ def eval_accuracy(
                     continue
                 correct += (preds[i, start:] == targets[i, start:]).sum().item()
                 total += targets.size(1) - start
+                seq_total += 1
+                if torch.equal(preds[i, start:], targets[i, start:]):
+                    seq_correct += 1
 
     return {
         "loss": total_loss / max(n_batches, 1),
         "accuracy": correct / max(total, 1),
+        "exact_match": seq_correct / max(seq_total, 1),
         "total_tokens": total,
     }
 
@@ -149,11 +161,12 @@ def run_experiment(
             "train_loss": round(train_loss, 4),
             "eval_loss": round(metrics["loss"], 4),
             "eval_accuracy": round(metrics["accuracy"], 4),
+            "eval_exact_match": round(metrics["exact_match"], 4),
         })
         if epoch % 5 == 0 or epoch == 1:
             print(f"  [{model_type}/{task_name}] epoch {epoch:>3d}  "
                   f"train={train_loss:.4f}  eval={metrics['loss']:.4f}  "
-                  f"acc={metrics['accuracy']:.4f}")
+                  f"acc={metrics['accuracy']:.4f}  em={metrics['exact_match']:.4f}")
 
     elapsed = time.time() - t0
     final = history[-1] if history else {}
@@ -167,6 +180,7 @@ def run_experiment(
         "final_train_loss": final.get("train_loss"),
         "final_eval_loss": final.get("eval_loss"),
         "final_accuracy": final.get("eval_accuracy"),
+        "final_exact_match": final.get("eval_exact_match"),
         "history": history,
     }
 
@@ -218,12 +232,13 @@ def main() -> None:
     print(f"\n{'='*60}")
     print(f"  SUMMARY")
     print(f"{'='*60}")
-    print(f"{'Task':<12} {'Model':<10} {'Params':>8} {'Loss':>8} {'Acc':>8} {'Time':>6}")
-    print("-" * 56)
+    print(f"{'Task':<12} {'Model':<15} {'Params':>8} {'Loss':>8} {'Acc':>8} {'EM':>8} {'Time':>6}")
+    print("-" * 70)
     for r in results:
-        print(f"{r['task']:<12} {r['model_type']:<10} {r['n_params']:>8,} "
+        em = r.get('final_exact_match', 0) or 0
+        print(f"{r['task']:<12} {r['model_type']:<15} {r['n_params']:>8,} "
               f"{r['final_eval_loss']:>8.4f} {r['final_accuracy']:>8.4f} "
-              f"{r['elapsed_s']:>5.0f}s")
+              f"{em:>8.4f} {r['elapsed_s']:>5.0f}s")
 
     # Save
     out_path = Path(args.output)
