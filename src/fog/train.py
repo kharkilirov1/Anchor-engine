@@ -12,7 +12,10 @@ from torch.utils.data import DataLoader
 from src.fog.config import FOGConfig, BASELINE_SMALL, MOTIF_SMALL, BASELINE_TINY, MOTIF_TINY, UNIFORM_TINY
 from src.fog.model_baseline import BaselineTransformer
 from src.fog.model_motif import MotifTransformer
-from src.fog.data import CopyTask, ReverseTask, SelectiveRetrieval
+from src.fog.data import (
+    CopyTask, ReverseTask, SelectiveRetrieval,
+    DistractorRetrieval, NoisyRetrieval, MultiQueryRetrieval,
+)
 
 
 def count_params(model: torch.nn.Module) -> int:
@@ -106,17 +109,19 @@ def run_experiment(
 
     # Data — use fixed seeds for data, model seed varies
     n_train, n_eval = 5000, 500
-    if task_name == "copy":
-        train_ds = CopyTask(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0)
-        eval_ds = CopyTask(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99)
-    elif task_name == "reverse":
-        train_ds = ReverseTask(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0)
-        eval_ds = ReverseTask(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99)
-    elif task_name == "retrieval":
-        train_ds = SelectiveRetrieval(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0)
-        eval_ds = SelectiveRetrieval(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99)
-    else:
-        raise ValueError(f"Unknown task: {task_name}")
+    task_map = {
+        "copy": CopyTask,
+        "reverse": ReverseTask,
+        "retrieval": SelectiveRetrieval,
+        "distractor": DistractorRetrieval,
+        "noisy": NoisyRetrieval,
+        "multiquery": MultiQueryRetrieval,
+    }
+    if task_name not in task_map:
+        raise ValueError(f"Unknown task: {task_name}. Choose from {list(task_map.keys())}")
+    task_cls = task_map[task_name]
+    train_ds = task_cls(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0)
+    eval_ds = task_cls(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
     eval_loader = DataLoader(eval_ds, batch_size=batch_size)
