@@ -74,6 +74,12 @@ class BaselineTransformer(nn.Module):
         self.ln_f = nn.LayerNorm(cfg.d_model)
         self.head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         self.tok_emb.weight = self.head.weight  # weight tying
+        # Pre-compute causal mask once
+        self.register_buffer(
+            "_causal_mask",
+            torch.tril(torch.ones(cfg.max_seq_len, cfg.max_seq_len, dtype=torch.bool)).unsqueeze(0).unsqueeze(0),
+            persistent=False,
+        )
 
     def forward(
         self,
@@ -85,8 +91,7 @@ class BaselineTransformer(nn.Module):
         pos = torch.arange(t, device=input_ids.device).unsqueeze(0)
         x = self.tok_emb(input_ids) + self.pos_emb(pos)
 
-        # causal mask
-        mask = torch.tril(torch.ones(t, t, device=x.device, dtype=torch.bool)).unsqueeze(0).unsqueeze(0)
+        mask = self._causal_mask[:, :, :t, :t]
 
         for block in self.blocks:
             x = block(x, mask)

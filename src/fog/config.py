@@ -67,3 +67,42 @@ MOTIF_TINY = FOGConfig(
     d_expand=256,
     d_gate=16,
 )
+
+# ── Micro configs: models at capacity boundary ────────────────
+# ~5-10K params — both architectures struggle, differences emerge
+
+BASELINE_MICRO = FOGConfig(
+    vocab_size=64,
+    d_model=48,
+    n_layers=3,
+    n_heads=2,
+    max_seq_len=64,
+    dropout=0.0,
+    d_ff=96,
+)
+
+MOTIF_MICRO = FOGConfig(
+    vocab_size=64,
+    d_model=48,
+    n_layers=3,
+    n_heads=2,
+    max_seq_len=64,
+    dropout=0.0,
+    d_ff=96,
+    d_compare=12,   # narrow: precise key matching (6 per head)
+    d_memory=36,    # wide: value storage (18 per head)
+    d_expand=72,
+    d_gate=12,      # thin: control path
+)
+
+# Param-matched uniform baseline for micro
+# d_model=42, d_ff=74 → 46,632 params (exact match with MOTIF_MICRO)
+UNIFORM_MICRO = FOGConfig(
+    vocab_size=64,
+    d_model=42,
+    n_layers=3,
+    n_heads=2,
+    max_seq_len=64,
+    dropout=0.0,
+    d_ff=74,
+)

@@ -7,14 +7,20 @@ import time
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
 
-from src.fog.config import FOGConfig, BASELINE_SMALL, MOTIF_SMALL, BASELINE_TINY, MOTIF_TINY, UNIFORM_TINY
+from src.fog.config import (
+    FOGConfig,
+    BASELINE_SMALL, MOTIF_SMALL,
+    BASELINE_TINY, MOTIF_TINY, UNIFORM_TINY,
+    BASELINE_MICRO, MOTIF_MICRO, UNIFORM_MICRO,
+)
 from src.fog.model_baseline import BaselineTransformer
 from src.fog.model_motif import MotifTransformer
 from src.fog.data import (
     CopyTask, ReverseTask, SelectiveRetrieval,
     DistractorRetrieval, NoisyRetrieval, MultiQueryRetrieval,
+    ChainedRetrieval,
+    prebatch_dataset, TensorBatchIterator,
 )
 
 
@@ -24,7 +30,7 @@ def count_params(model: torch.nn.Module) -> int:
 
 def train_epoch(
     model: torch.nn.Module,
-    loader: DataLoader,
+    loader: TensorBatchIterator,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
 ) -> float:
@@ -34,9 +40,7 @@ def train_epoch(
     for batch in loader:
         input_ids = batch["input_ids"].to(device)
         targets = batch["targets"].to(device)
-        loss_mask = batch.get("loss_mask")
-        if loss_mask is not None:
-            loss_mask = loss_mask.to(device)
+        loss_mask = batch["loss_mask"].to(device)
         out = model(input_ids, targets, loss_mask=loss_mask)
         loss = out["loss"]
         optimizer.zero_grad()
@@ -51,11 +55,9 @@ def train_epoch(
 @torch.no_grad()
 def eval_accuracy(
     model: torch.nn.Module,
-    loader: DataLoader,
+    loader: TensorBatchIterator,
     device: torch.device,
-    sep_token: int,
 ) -> dict[str, float]:
-    """Compute loss and post-SEP token accuracy."""
     model.eval()
     total_loss = 0.0
     correct = 0
@@ -66,37 +68,20 @@ def eval_accuracy(
     for batch in loader:
         input_ids = batch["input_ids"].to(device)
         targets = batch["targets"].to(device)
-        loss_mask = batch.get("loss_mask")
-        if loss_mask is not None:
-            loss_mask = loss_mask.to(device)
+        loss_mask = batch["loss_mask"].to(device)
         out = model(input_ids, targets, loss_mask=loss_mask)
         total_loss += out["loss"].item()
         n_batches += 1
 
         preds = out["logits"].argmax(dim=-1)
-        if loss_mask is not None:
-            m = loss_mask.bool()
-            correct += (preds[m] == targets[m]).sum().item()
-            total += m.sum().item()
-            # exact match per sequence
-            for b in range(preds.size(0)):
-                mb = m[b]
-                if mb.any():
-                    seq_total += 1
-                    if torch.equal(preds[b][mb], targets[b][mb]):
-                        seq_correct += 1
-        else:
-            for i in range(input_ids.size(0)):
-                sep_positions = (input_ids[i] == sep_token).nonzero(as_tuple=True)[0]
-                if len(sep_positions) == 0:
-                    continue
-                start = sep_positions[0].item() + 1
-                if start >= targets.size(1):
-                    continue
-                correct += (preds[i, start:] == targets[i, start:]).sum().item()
-                total += targets.size(1) - start
+        m = loss_mask.bool()
+        correct += (preds[m] == targets[m]).sum().item()
+        total += m.sum().item()
+        for b in range(preds.size(0)):
+            mb = m[b]
+            if mb.any():
                 seq_total += 1
-                if torch.equal(preds[i, start:], targets[i, start:]):
+                if torch.equal(preds[b][mb], targets[b][mb]):
                     seq_correct += 1
 
     return {
@@ -105,6 +90,17 @@ def eval_accuracy(
         "exact_match": seq_correct / max(seq_total, 1),
         "total_tokens": total,
     }
+
+
+TASK_MAP = {
+    "copy": CopyTask,
+    "reverse": ReverseTask,
+    "retrieval": SelectiveRetrieval,
+    "distractor": DistractorRetrieval,
+    "noisy": NoisyRetrieval,
+    "multiquery": MultiQueryRetrieval,
+    "chained": ChainedRetrieval,
+}
 
 
 def run_experiment(
@@ -116,29 +112,31 @@ def run_experiment(
     lr: float,
     device: torch.device,
     seed: int = 42,
+    n_train: int = 2000,
+    n_eval: int = 500,
 ) -> dict:
     torch.manual_seed(seed)
 
-    # Data — use fixed seeds for data, model seed varies
-    n_train, n_eval = 5000, 500
-    task_map = {
-        "copy": CopyTask,
-        "reverse": ReverseTask,
-        "retrieval": SelectiveRetrieval,
-        "distractor": DistractorRetrieval,
-        "noisy": NoisyRetrieval,
-        "multiquery": MultiQueryRetrieval,
-    }
-    if task_name not in task_map:
-        raise ValueError(f"Unknown task: {task_name}. Choose from {list(task_map.keys())}")
-    task_cls = task_map[task_name]
-    train_ds = task_cls(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0)
-    eval_ds = task_cls(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99)
+    if task_name not in TASK_MAP:
+        raise ValueError(f"Unknown task: {task_name}. Choose from {list(TASK_MAP.keys())}")
+    task_cls = TASK_MAP[task_name]
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
-    eval_loader = DataLoader(eval_ds, batch_size=batch_size)
+    # Use n_pairs=6 for chained (needs enough pairs for chains to form)
+    extra_kwargs = {}
+    if task_name == "chained":
+        extra_kwargs["n_pairs"] = 6
+    elif task_name in ("distractor", "noisy", "multiquery", "retrieval"):
+        extra_kwargs["n_pairs"] = 4
 
-    # Model
+    train_ds = task_cls(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0, **extra_kwargs)
+    eval_ds = task_cls(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99, **extra_kwargs)
+
+    # Pre-batch into contiguous tensors for speed
+    train_data = prebatch_dataset(train_ds, cfg.max_seq_len)
+    eval_data = prebatch_dataset(eval_ds, cfg.max_seq_len)
+    train_loader = TensorBatchIterator(train_data, batch_size, shuffle=True)
+    eval_loader = TensorBatchIterator(eval_data, batch_size, shuffle=False)
+
     if model_type in ("baseline", "uniform_small"):
         model = BaselineTransformer(cfg).to(device)
     elif model_type == "motif":
@@ -149,13 +147,12 @@ def run_experiment(
     n_params = count_params(model)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
 
-    sep_token = cfg.vocab_size - 1
     history: list[dict] = []
     t0 = time.time()
 
     for epoch in range(1, n_epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, device)
-        metrics = eval_accuracy(model, eval_loader, device, sep_token)
+        metrics = eval_accuracy(model, eval_loader, device)
         history.append({
             "epoch": epoch,
             "train_loss": round(train_loss, 4),
@@ -163,7 +160,7 @@ def run_experiment(
             "eval_accuracy": round(metrics["accuracy"], 4),
             "eval_exact_match": round(metrics["exact_match"], 4),
         })
-        if epoch % 5 == 0 or epoch == 1:
+        if epoch % 10 == 0 or epoch == 1:
             print(f"  [{model_type}/{task_name}] epoch {epoch:>3d}  "
                   f"train={train_loss:.4f}  eval={metrics['loss']:.4f}  "
                   f"acc={metrics['accuracy']:.4f}  em={metrics['exact_match']:.4f}")
@@ -189,18 +186,31 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="FOG Ablation: baseline vs motif-aware")
     parser.add_argument("--tasks", nargs="+", default=["copy", "reverse", "retrieval"])
     parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--size", type=str, default="tiny", choices=["tiny", "small"])
+    parser.add_argument("--size", type=str, default="micro",
+                        choices=["micro", "tiny", "small"])
     parser.add_argument("--seeds", type=int, nargs="+", default=[42])
+    parser.add_argument("--n_train", type=int, default=2000)
+    parser.add_argument("--n_eval", type=int, default=500)
     parser.add_argument("--output", type=str, default="archive/fog_ablation.json")
     args = parser.parse_args()
 
     device = torch.device(args.device)
 
-    if args.size == "tiny":
-        configs = [("baseline", BASELINE_TINY), ("uniform_small", UNIFORM_TINY), ("motif", MOTIF_TINY)]
+    if args.size == "micro":
+        configs = [
+            ("baseline", BASELINE_MICRO),
+            ("uniform_small", UNIFORM_MICRO),
+            ("motif", MOTIF_MICRO),
+        ]
+    elif args.size == "tiny":
+        configs = [
+            ("baseline", BASELINE_TINY),
+            ("uniform_small", UNIFORM_TINY),
+            ("motif", MOTIF_TINY),
+        ]
     else:
         configs = [("baseline", BASELINE_SMALL), ("motif", MOTIF_SMALL)]
 
@@ -222,10 +232,13 @@ def main() -> None:
                     lr=args.lr,
                     device=device,
                     seed=seed,
+                    n_train=args.n_train,
+                    n_eval=args.n_eval,
                 )
                 results.append(result)
                 print(f"  -> {model_type}: params={result['n_params']:,}  "
                       f"acc={result['final_accuracy']:.4f}  "
+                      f"em={result['final_exact_match']:.4f}  "
                       f"time={result['elapsed_s']}s")
 
     # Summary
@@ -240,7 +253,6 @@ def main() -> None:
               f"{r['final_eval_loss']:>8.4f} {r['final_accuracy']:>8.4f} "
               f"{em:>8.4f} {r['elapsed_s']:>5.0f}s")
 
-    # Save
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
