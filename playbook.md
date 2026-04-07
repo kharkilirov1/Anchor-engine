@@ -128,6 +128,23 @@ Auto-calibrated пороги: mature_r1 0.650→0.238, template_delta 0.080→0.
 
 **Итог:** auto-calibration снизила LOSS с 14 до 6 (−57%), отсекла тяжёлые провалы (formal −39.7, minimalist −26.1, typescript −22.3). Потеряны 3 wins (fastapi +27.2, proof +3.0, drug_free +2.2).
 
+### H6 Continuous Bias — Qwen2.5-1.5B (HF Space T4, 2026-04-07)
+
+| Метрика | Binary (4B) | H6 continuous (1.5B) |
+|---|---|---|
+| Anchor invoked | 7/20 | 14/20 |
+| Wins | 1 | **6** |
+| LOSS | 6 | **8** |
+| Win rate | 14% | **43%** |
+
+**Паттерн:** anchor помогает когда base_q < 0 (83% win rate), вредит когда base_q > 20 (100% loss).
+Continuous bias снижает урон (kubernetes bias=0.031 вместо 1.50), но не устраняет полностью.
+
+Лучшие wins: vegan +49.6, rust +42.8, postgresql +21.4, formal_academic +11.1.
+Worst loss: kubernetes -93.8 (base=130, bias=0.031 всё равно навредил).
+
+**Вывод:** H6 подтверждает что anchor = guardrail для слабого base. Нужен cutoff: если bias_scale < 0.05, skip anchor.
+
 ### Ключевой вывод
 - Binary gating (apply/skip anchor) — **неэффективен** для 4B модели
 - r1 одинаков у winners и losers → геометрия одного слоя не разделяет их
