@@ -122,7 +122,7 @@ def run_experiment(
     eval_loader = DataLoader(eval_ds, batch_size=batch_size)
 
     # Model
-    if model_type == "baseline":
+    if model_type in ("baseline", "uniform_small"):
         model = BaselineTransformer(cfg).to(device)
     elif model_type == "motif":
         model = MotifTransformer(cfg).to(device)
