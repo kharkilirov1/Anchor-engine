@@ -286,3 +286,137 @@ class ChainedRetrieval(Dataset):
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         return self.items[idx]
+
+
+# ── Stress tasks for 400-800K models ────────────────────────────
+
+
+class DenseRetrieval(Dataset):
+    """Many KV pairs (16-20), large vocab, one query. Stresses memory capacity."""
+
+    def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
+                 n_pairs: int = 16, seed: int = 42):
+        super().__init__()
+        sep = vocab_size - 1
+        rng = random.Random(seed)
+        cv = vocab_size - 2
+        self.items = []
+        for _ in range(n_samples):
+            keys = rng.sample(range(cv), min(n_pairs, cv))
+            values = [rng.randint(0, cv - 1) for _ in keys]
+            qi = rng.randint(0, len(keys) - 1)
+            ids = []
+            for k, v in zip(keys, values):
+                ids.extend([k, v])
+            sp = len(ids)
+            ids += [sep, keys[qi], values[qi]]
+            self.items.append(_build_item(ids, sp, seq_len))
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        return self.items[idx]
+
+
+class NoisyDenseRetrieval(Dataset):
+    """10 KV pairs with 4-6 noise tokens between each. Forces filtering + memory."""
+
+    def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
+                 n_pairs: int = 10, noise_len: int = 4, seed: int = 42):
+        super().__init__()
+        sep = vocab_size - 1
+        rng = random.Random(seed)
+        cv = vocab_size - 2
+        self.items = []
+        for _ in range(n_samples):
+            keys = rng.sample(range(cv), min(n_pairs, cv))
+            values = [rng.randint(0, cv - 1) for _ in keys]
+            qi = rng.randint(0, len(keys) - 1)
+            ids = []
+            for i, (k, v) in enumerate(zip(keys, values)):
+                ids.extend([k, v])
+                if i < len(keys) - 1:
+                    nl = rng.randint(noise_len, noise_len + 2)
+                    ids.extend([rng.randint(0, cv - 1) for _ in range(nl)])
+            sp = len(ids)
+            ids += [sep, keys[qi], values[qi]]
+            self.items.append(_build_item(ids, sp, seq_len))
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        return self.items[idx]
+
+
+class SortedRetrieval(Dataset):
+    """Retrieve values in sorted key order. Tests compare + memory + ordering."""
+
+    def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
+                 n_pairs: int = 6, seed: int = 42):
+        super().__init__()
+        sep = vocab_size - 1
+        rng = random.Random(seed)
+        cv = vocab_size - 2
+        self.items = []
+        for _ in range(n_samples):
+            keys = rng.sample(range(cv), min(n_pairs, cv))
+            values = [rng.randint(0, cv - 1) for _ in keys]
+            sorted_pairs = sorted(zip(keys, values))
+            ids = []
+            for k, v in zip(keys, values):
+                ids.extend([k, v])
+            sp = len(ids)
+            ids.append(sep)
+            for _, v in sorted_pairs:
+                ids.append(v)
+            self.items.append(_build_item(ids, sp, seq_len))
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        return self.items[idx]
+
+
+class MultiHopChained(Dataset):
+    """3-hop chained retrieval. query→v1→v2→v3 (answer)."""
+
+    def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
+                 n_pairs: int = 12, seed: int = 42):
+        super().__init__()
+        sep = vocab_size - 1
+        rng = random.Random(seed)
+        cv = vocab_size - 2
+        self.items = []
+        attempts = 0
+        while len(self.items) < n_samples and attempts < n_samples * 50:
+            attempts += 1
+            if cv < n_pairs:
+                break
+            keys = rng.sample(range(cv), n_pairs)
+            values = [rng.randint(0, cv - 1) for _ in keys]
+            kv = dict(zip(keys, values))
+            for start_idx in range(n_pairs):
+                k0 = keys[start_idx]
+                v0 = values[start_idx]
+                if v0 not in kv or v0 == k0:
+                    continue
+                v1 = kv[v0]
+                if v1 not in kv or v1 == v0:
+                    continue
+                v2 = kv[v1]
+                ids = []
+                for k, v in zip(keys, values):
+                    ids.extend([k, v])
+                sp = len(ids)
+                ids += [sep, k0, v2]
+                self.items.append(_build_item(ids, sp, seq_len))
+                break
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        return self.items[idx]

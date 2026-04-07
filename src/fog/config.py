@@ -106,3 +106,42 @@ UNIFORM_MICRO = FOGConfig(
     dropout=0.0,
     d_ff=74,
 )
+
+# ── Medium configs: 400-800K params, hard tasks ───────────────
+# vocab=256, seq=128 — enough combinatorial diversity to stress models
+
+BASELINE_MED = FOGConfig(
+    vocab_size=256,
+    d_model=128,
+    n_layers=4,
+    n_heads=4,
+    max_seq_len=128,
+    dropout=0.05,
+    d_ff=512,
+)
+
+MOTIF_MED = FOGConfig(
+    vocab_size=256,
+    d_model=128,
+    n_layers=4,
+    n_heads=4,
+    max_seq_len=128,
+    dropout=0.05,
+    d_ff=512,
+    d_compare=32,   # narrow: 8 per head
+    d_memory=96,    # wide: 24 per head
+    d_expand=256,
+    d_gate=16,
+)
+
+# Param-matched uniform for med
+# d_model=96, d_ff=369 → ~473K params (matches MOTIF_MED)
+UNIFORM_MED = FOGConfig(
+    vocab_size=256,
+    d_model=96,
+    n_layers=4,
+    n_heads=4,
+    max_seq_len=128,
+    dropout=0.05,
+    d_ff=369,
+)

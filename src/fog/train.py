@@ -13,6 +13,7 @@ from src.fog.config import (
     BASELINE_SMALL, MOTIF_SMALL,
     BASELINE_TINY, MOTIF_TINY, UNIFORM_TINY,
     BASELINE_MICRO, MOTIF_MICRO, UNIFORM_MICRO,
+    BASELINE_MED, MOTIF_MED, UNIFORM_MED,
 )
 from src.fog.model_baseline import BaselineTransformer
 from src.fog.model_motif import MotifTransformer
@@ -20,6 +21,7 @@ from src.fog.data import (
     CopyTask, ReverseTask, SelectiveRetrieval,
     DistractorRetrieval, NoisyRetrieval, MultiQueryRetrieval,
     ChainedRetrieval,
+    DenseRetrieval, NoisyDenseRetrieval, SortedRetrieval, MultiHopChained,
     prebatch_dataset, TensorBatchIterator,
 )
 
@@ -100,6 +102,10 @@ TASK_MAP = {
     "noisy": NoisyRetrieval,
     "multiquery": MultiQueryRetrieval,
     "chained": ChainedRetrieval,
+    "dense": DenseRetrieval,
+    "noisy_dense": NoisyDenseRetrieval,
+    "sorted": SortedRetrieval,
+    "multihop": MultiHopChained,
 }
 
 
@@ -124,6 +130,15 @@ def run_experiment(
     # Use n_pairs=6 for chained (needs enough pairs for chains to form)
     extra_kwargs = {}
     if task_name == "chained":
+        extra_kwargs["n_pairs"] = 6
+    elif task_name == "multihop":
+        extra_kwargs["n_pairs"] = 12
+    elif task_name == "dense":
+        extra_kwargs["n_pairs"] = 16
+    elif task_name == "noisy_dense":
+        extra_kwargs["n_pairs"] = 10
+        extra_kwargs["noise_len"] = 4
+    elif task_name == "sorted":
         extra_kwargs["n_pairs"] = 6
     elif task_name in ("distractor", "noisy", "multiquery", "retrieval"):
         extra_kwargs["n_pairs"] = 4
@@ -189,8 +204,8 @@ def main() -> None:
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--size", type=str, default="micro",
-                        choices=["micro", "tiny", "small"])
+    parser.add_argument("--size", type=str, default="med",
+                        choices=["micro", "tiny", "med", "small"])
     parser.add_argument("--seeds", type=int, nargs="+", default=[42])
     parser.add_argument("--n_train", type=int, default=2000)
     parser.add_argument("--n_eval", type=int, default=500)
@@ -210,6 +225,12 @@ def main() -> None:
             ("baseline", BASELINE_TINY),
             ("uniform_small", UNIFORM_TINY),
             ("motif", MOTIF_TINY),
+        ]
+    elif args.size == "med":
+        configs = [
+            ("baseline", BASELINE_MED),
+            ("uniform_small", UNIFORM_MED),
+            ("motif", MOTIF_MED),
         ]
     else:
         configs = [("baseline", BASELINE_SMALL), ("motif", MOTIF_SMALL)]
