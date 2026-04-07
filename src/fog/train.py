@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from src.fog.config import FOGConfig, BASELINE_SMALL, MOTIF_SMALL
+from src.fog.config import FOGConfig, BASELINE_SMALL, MOTIF_SMALL, BASELINE_TINY, MOTIF_TINY
 from src.fog.model_baseline import BaselineTransformer
 from src.fog.model_motif import MotifTransformer
 from src.fog.data import CopyTask, ReverseTask, SelectiveRetrieval
@@ -158,18 +158,25 @@ def main() -> None:
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--size", type=str, default="tiny", choices=["tiny", "small"])
     parser.add_argument("--output", type=str, default="archive/fog_ablation.json")
     args = parser.parse_args()
 
     device = torch.device(args.device)
+
+    if args.size == "tiny":
+        configs = [("baseline", BASELINE_TINY), ("motif", MOTIF_TINY)]
+    else:
+        configs = [("baseline", BASELINE_SMALL), ("motif", MOTIF_SMALL)]
+
     results = []
 
     for task in args.tasks:
         print(f"\n{'='*60}")
-        print(f"  Task: {task}")
+        print(f"  Task: {task} (size={args.size})")
         print(f"{'='*60}")
 
-        for model_type, cfg in [("baseline", BASELINE_SMALL), ("motif", MOTIF_SMALL)]:
+        for model_type, cfg in configs:
             result = run_experiment(
                 task_name=task,
                 cfg=cfg,

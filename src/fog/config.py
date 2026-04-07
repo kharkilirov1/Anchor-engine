@@ -33,3 +33,26 @@ MOTIF_SMALL = FOGConfig(
     d_expand=512,
     d_gate=32,
 )
+
+# Tiny configs for fast iteration
+BASELINE_TINY = FOGConfig(
+    vocab_size=32,
+    d_model=128,
+    n_layers=4,
+    n_heads=4,
+    max_seq_len=32,
+    d_ff=512,
+)
+
+MOTIF_TINY = FOGConfig(
+    vocab_size=32,
+    d_model=128,
+    n_layers=4,
+    n_heads=4,
+    max_seq_len=32,
+    d_ff=512,
+    d_compare=32,
+    d_memory=96,
+    d_expand=256,
+    d_gate=16,
+)
