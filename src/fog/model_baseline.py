@@ -79,6 +79,7 @@ class BaselineTransformer(nn.Module):
         self,
         input_ids: torch.Tensor,
         targets: torch.Tensor | None = None,
+        loss_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         b, t = input_ids.shape
         pos = torch.arange(t, device=input_ids.device).unsqueeze(0)
@@ -95,6 +96,16 @@ class BaselineTransformer(nn.Module):
 
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+            if loss_mask is not None:
+                # only compute loss on target positions (after SEP)
+                flat_logits = logits.view(-1, logits.size(-1))
+                flat_targets = targets.view(-1)
+                flat_mask = loss_mask.view(-1).bool()
+                if flat_mask.any():
+                    loss = F.cross_entropy(flat_logits[flat_mask], flat_targets[flat_mask])
+                else:
+                    loss = torch.tensor(0.0, device=logits.device)
+            else:
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
         return {"logits": logits, "loss": loss}

@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
-from src.fog.config import FOGConfig, BASELINE_SMALL, MOTIF_SMALL, BASELINE_TINY, MOTIF_TINY
+from src.fog.config import FOGConfig, BASELINE_SMALL, MOTIF_SMALL, BASELINE_TINY, MOTIF_TINY, UNIFORM_TINY
 from src.fog.model_baseline import BaselineTransformer
 from src.fog.model_motif import MotifTransformer
 from src.fog.data import CopyTask, ReverseTask, SelectiveRetrieval
@@ -31,7 +31,10 @@ def train_epoch(
     for batch in loader:
         input_ids = batch["input_ids"].to(device)
         targets = batch["targets"].to(device)
-        out = model(input_ids, targets)
+        loss_mask = batch.get("loss_mask")
+        if loss_mask is not None:
+            loss_mask = loss_mask.to(device)
+        out = model(input_ids, targets, loss_mask=loss_mask)
         loss = out["loss"]
         optimizer.zero_grad()
         loss.backward()
@@ -58,21 +61,29 @@ def eval_accuracy(
     for batch in loader:
         input_ids = batch["input_ids"].to(device)
         targets = batch["targets"].to(device)
-        out = model(input_ids, targets)
+        loss_mask = batch.get("loss_mask")
+        if loss_mask is not None:
+            loss_mask = loss_mask.to(device)
+        out = model(input_ids, targets, loss_mask=loss_mask)
         total_loss += out["loss"].item()
         n_batches += 1
 
         preds = out["logits"].argmax(dim=-1)
-        # only count accuracy after SEP token
-        for i in range(input_ids.size(0)):
-            sep_positions = (input_ids[i] == sep_token).nonzero(as_tuple=True)[0]
-            if len(sep_positions) == 0:
-                continue
-            start = sep_positions[0].item() + 1
-            if start >= targets.size(1):
-                continue
-            correct += (preds[i, start:] == targets[i, start:]).sum().item()
-            total += targets.size(1) - start
+        # accuracy only on masked (target) positions
+        if loss_mask is not None:
+            m = loss_mask.bool()
+            correct += (preds[m] == targets[m]).sum().item()
+            total += m.sum().item()
+        else:
+            for i in range(input_ids.size(0)):
+                sep_positions = (input_ids[i] == sep_token).nonzero(as_tuple=True)[0]
+                if len(sep_positions) == 0:
+                    continue
+                start = sep_positions[0].item() + 1
+                if start >= targets.size(1):
+                    continue
+                correct += (preds[i, start:] == targets[i, start:]).sum().item()
+                total += targets.size(1) - start
 
     return {
         "loss": total_loss / max(n_batches, 1),
@@ -89,17 +100,20 @@ def run_experiment(
     batch_size: int,
     lr: float,
     device: torch.device,
+    seed: int = 42,
 ) -> dict:
-    # Data
+    torch.manual_seed(seed)
+
+    # Data — use fixed seeds for data, model seed varies
     n_train, n_eval = 5000, 500
     if task_name == "copy":
-        train_ds = CopyTask(cfg.vocab_size, cfg.max_seq_len, n_train, seed=42)
+        train_ds = CopyTask(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0)
         eval_ds = CopyTask(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99)
     elif task_name == "reverse":
-        train_ds = ReverseTask(cfg.vocab_size, cfg.max_seq_len, n_train, seed=42)
+        train_ds = ReverseTask(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0)
         eval_ds = ReverseTask(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99)
     elif task_name == "retrieval":
-        train_ds = SelectiveRetrieval(cfg.vocab_size, cfg.max_seq_len, n_train, seed=42)
+        train_ds = SelectiveRetrieval(cfg.vocab_size, cfg.max_seq_len, n_train, seed=0)
         eval_ds = SelectiveRetrieval(cfg.vocab_size, cfg.max_seq_len, n_eval, seed=99)
     else:
         raise ValueError(f"Unknown task: {task_name}")
@@ -141,6 +155,7 @@ def run_experiment(
     return {
         "model_type": model_type,
         "task": task_name,
+        "seed": seed,
         "n_params": n_params,
         "n_epochs": n_epochs,
         "elapsed_s": round(elapsed, 1),
@@ -159,37 +174,40 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--size", type=str, default="tiny", choices=["tiny", "small"])
+    parser.add_argument("--seeds", type=int, nargs="+", default=[42])
     parser.add_argument("--output", type=str, default="archive/fog_ablation.json")
     args = parser.parse_args()
 
     device = torch.device(args.device)
 
     if args.size == "tiny":
-        configs = [("baseline", BASELINE_TINY), ("motif", MOTIF_TINY)]
+        configs = [("baseline", BASELINE_TINY), ("uniform_small", UNIFORM_TINY), ("motif", MOTIF_TINY)]
     else:
         configs = [("baseline", BASELINE_SMALL), ("motif", MOTIF_SMALL)]
 
     results = []
 
     for task in args.tasks:
-        print(f"\n{'='*60}")
-        print(f"  Task: {task} (size={args.size})")
-        print(f"{'='*60}")
+        for seed in args.seeds:
+            print(f"\n{'='*60}")
+            print(f"  Task: {task} (size={args.size}, seed={seed})")
+            print(f"{'='*60}")
 
-        for model_type, cfg in configs:
-            result = run_experiment(
-                task_name=task,
-                cfg=cfg,
-                model_type=model_type,
-                n_epochs=args.epochs,
-                batch_size=args.batch_size,
-                lr=args.lr,
-                device=device,
-            )
-            results.append(result)
-            print(f"  → {model_type}: params={result['n_params']:,}  "
-                  f"acc={result['final_accuracy']:.4f}  "
-                  f"time={result['elapsed_s']}s")
+            for model_type, cfg in configs:
+                result = run_experiment(
+                    task_name=task,
+                    cfg=cfg,
+                    model_type=model_type,
+                    n_epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    lr=args.lr,
+                    device=device,
+                    seed=seed,
+                )
+                results.append(result)
+                print(f"  -> {model_type}: params={result['n_params']:,}  "
+                      f"acc={result['final_accuracy']:.4f}  "
+                      f"time={result['elapsed_s']}s")
 
     # Summary
     print(f"\n{'='*60}")

@@ -34,6 +34,17 @@ MOTIF_SMALL = FOGConfig(
     d_gate=32,
 )
 
+# Param-matched uniform baseline for controlled comparison
+# d_model=94, d_ff=376 → ~432K params to match MOTIF_TINY
+UNIFORM_TINY = FOGConfig(
+    vocab_size=32,
+    d_model=94,
+    n_layers=4,
+    n_heads=2,
+    max_seq_len=32,
+    d_ff=376,
+)
+
 # Tiny configs for fast iteration
 BASELINE_TINY = FOGConfig(
     vocab_size=32,

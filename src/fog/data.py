@@ -16,17 +16,18 @@ class CopyTask(Dataset):
         self.sep_token = vocab_size - 1
         rng = random.Random(seed)
         self.samples = []
-        content_vocab = vocab_size - 1  # exclude SEP
+        self.sep_positions = []
+        content_vocab = vocab_size - 1
         half = seq_len // 2 - 1
         for _ in range(n_samples):
             content = [rng.randint(0, content_vocab - 1) for _ in range(half)]
-            # input: content + SEP + content (teacher forcing)
             ids = content + [self.sep_token] + content
-            # pad/truncate to seq_len
+            sep_pos = len(content)
             ids = ids[:seq_len]
             while len(ids) < seq_len:
                 ids.append(0)
             self.samples.append(ids)
+            self.sep_positions.append(sep_pos)
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -35,7 +36,12 @@ class CopyTask(Dataset):
         ids = self.samples[idx]
         x = torch.tensor(ids[:-1], dtype=torch.long)
         y = torch.tensor(ids[1:], dtype=torch.long)
-        return {"input_ids": x, "targets": y}
+        # loss_mask: 1 after SEP, 0 before (shifted by -1 for targets)
+        mask = torch.zeros_like(y)
+        sep = self.sep_positions[idx]
+        if sep < len(mask):
+            mask[sep:] = 1
+        return {"input_ids": x, "targets": y, "loss_mask": mask}
 
 
 class ReverseTask(Dataset):
@@ -47,15 +53,18 @@ class ReverseTask(Dataset):
         self.sep_token = vocab_size - 1
         rng = random.Random(seed)
         self.samples = []
+        self.sep_positions = []
         content_vocab = vocab_size - 1
         half = seq_len // 2 - 1
         for _ in range(n_samples):
             content = [rng.randint(0, content_vocab - 1) for _ in range(half)]
             ids = content + [self.sep_token] + list(reversed(content))
+            sep_pos = len(content)
             ids = ids[:seq_len]
             while len(ids) < seq_len:
                 ids.append(0)
             self.samples.append(ids)
+            self.sep_positions.append(sep_pos)
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -64,7 +73,11 @@ class ReverseTask(Dataset):
         ids = self.samples[idx]
         x = torch.tensor(ids[:-1], dtype=torch.long)
         y = torch.tensor(ids[1:], dtype=torch.long)
-        return {"input_ids": x, "targets": y}
+        mask = torch.zeros_like(y)
+        sep = self.sep_positions[idx]
+        if sep < len(mask):
+            mask[sep:] = 1
+        return {"input_ids": x, "targets": y, "loss_mask": mask}
 
 
 class SelectiveRetrieval(Dataset):
@@ -79,6 +92,7 @@ class SelectiveRetrieval(Dataset):
         self.sep_token = vocab_size - 1
         rng = random.Random(seed)
         self.samples = []
+        self.sep_positions = []
         content_vocab = vocab_size - 2  # exclude SEP and padding
         for _ in range(n_samples):
             keys = rng.sample(range(content_vocab), min(n_pairs, content_vocab))
@@ -88,6 +102,7 @@ class SelectiveRetrieval(Dataset):
             ids = []
             for k, v in zip(keys, values):
                 ids.extend([k, v])
+            sep_pos = len(ids)
             ids.append(self.sep_token)
             ids.append(keys[query_idx])
             ids.append(values[query_idx])
@@ -96,6 +111,7 @@ class SelectiveRetrieval(Dataset):
             while len(ids) < seq_len:
                 ids.append(0)
             self.samples.append(ids)
+            self.sep_positions.append(sep_pos)
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -104,4 +120,8 @@ class SelectiveRetrieval(Dataset):
         ids = self.samples[idx]
         x = torch.tensor(ids[:-1], dtype=torch.long)
         y = torch.tensor(ids[1:], dtype=torch.long)
-        return {"input_ids": x, "targets": y}
+        mask = torch.zeros_like(y)
+        sep = self.sep_positions[idx]
+        if sep < len(mask):
+            mask[sep:] = 1
+        return {"input_ids": x, "targets": y, "loss_mask": mask}
