@@ -91,10 +91,7 @@ def test_theta_ordering_guaranteed():
     rd = RoutingDecision()
     assert rd.theta2.item() > rd.theta1.item()
     assert rd.theta3.item() > rd.theta2.item()
-    # Even after adversarial raw values
-    rd.theta1_raw.data.fill_(10.0)
-    rd.theta2_delta.data.fill_(-5.0)
-    rd.theta3_delta.data.fill_(-5.0)
+    rd.threshold_offsets.data = torch.tensor([10.0, -10.0, -10.0])
     assert rd.theta2.item() > rd.theta1.item()
     assert rd.theta3.item() > rd.theta2.item()
 
@@ -105,6 +102,20 @@ def test_theta_gradients_flow():
     out = rd(ed)
     loss = out["route_probs"].sum()
     loss.backward()
-    assert rd.theta1_raw.grad is not None
-    assert rd.theta2_delta.grad is not None
-    assert rd.theta3_delta.grad is not None
+    assert rd.threshold_offsets.grad is not None
+
+
+def test_routing_targets_do_not_collapse_to_single_route():
+    rd = RoutingDecision(
+        target_fractions=(0.5, 0.25, 0.15, 0.10),
+        threshold_momentum=1.0,
+        temperature=12.0,
+    )
+    rd.train()
+    ed = torch.linspace(0.0, 1.0, steps=200).view(1, 200)
+    out = rd(ed)
+    route = out["route"]
+    ratios = torch.stack([(route == i).float().mean() for i in range(4)])
+    assert torch.all(ratios > 0.05)
+    expected = torch.tensor([0.5, 0.25, 0.15, 0.10])
+    assert torch.allclose(ratios, expected, atol=0.12)

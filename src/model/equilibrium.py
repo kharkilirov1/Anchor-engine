@@ -63,27 +63,60 @@ class EquilibriumSignal(nn.Module):
 class RoutingDecision(nn.Module):
     """Converts equilibrium deviation into routing decisions.
 
-    Thresholds are learnable parameters.
+    Buckets are calibrated from running ED quantiles so Stage B does not collapse
+    to a single route just because the absolute ED scale shifted.
+    Small learnable offsets allow training to nudge boundaries around the
+    quantile-derived defaults.
     """
 
-    def __init__(self, init_thresholds: tuple[float, float, float] = (0.5, 0.5, 1.0)):
+    def __init__(
+        self,
+        init_thresholds: tuple[float, float, float] = (0.75, 1.0, 1.35),
+        target_fractions: tuple[float, float, float, float] = (0.55, 0.25, 0.15, 0.05),
+        threshold_momentum: float = 0.2,
+        temperature: float = 8.0,
+        offset_scale: float = 0.2,
+    ):
         super().__init__()
-        # Constrained thresholds: theta1 < theta2 < theta3 via softplus deltas
-        self.theta1_raw = nn.Parameter(torch.tensor(init_thresholds[0]))
-        self.theta2_delta = nn.Parameter(torch.tensor(init_thresholds[1]))  # > 0 via softplus
-        self.theta3_delta = nn.Parameter(torch.tensor(init_thresholds[2]))  # > 0 via softplus
+        fractions = torch.tensor(target_fractions, dtype=torch.float32)
+        fractions = fractions / fractions.sum().clamp_min(1e-8)
+        self.register_buffer("target_cdf", fractions.cumsum(dim=0)[:-1])
+        self.register_buffer("running_thresholds", torch.tensor(init_thresholds, dtype=torch.float32))
+        self.register_buffer("num_batches_tracked", torch.tensor(0, dtype=torch.long))
+        self.threshold_momentum = threshold_momentum
+        self.temperature = temperature
+        self.offset_scale = offset_scale
+        self.threshold_offsets = nn.Parameter(torch.zeros(3))
+
+    def _batch_thresholds(self, ed: torch.Tensor) -> torch.Tensor:
+        flat = ed.detach().reshape(-1)
+        if flat.numel() == 0:
+            return self.running_thresholds
+        return torch.quantile(flat, self.target_cdf.to(device=ed.device, dtype=flat.dtype))
+
+    def _ordered_thresholds(self, base: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        offsets = self.offset_scale * torch.tanh(self.threshold_offsets).to(base.device, base.dtype)
+        raw = base + offsets
+        min_gap = torch.tensor(1e-3, device=base.device, dtype=base.dtype)
+        t1 = raw[0]
+        t2 = torch.maximum(raw[1], t1 + min_gap)
+        t3 = torch.maximum(raw[2], t2 + min_gap)
+        return t1, t2, t3
 
     @property
     def theta1(self) -> torch.Tensor:
-        return self.theta1_raw
+        thresholds = self._ordered_thresholds(self.running_thresholds)
+        return thresholds[0]
 
     @property
     def theta2(self) -> torch.Tensor:
-        return self.theta1 + F.softplus(self.theta2_delta)
+        thresholds = self._ordered_thresholds(self.running_thresholds)
+        return thresholds[1]
 
     @property
     def theta3(self) -> torch.Tensor:
-        return self.theta2 + F.softplus(self.theta3_delta)
+        thresholds = self._ordered_thresholds(self.running_thresholds)
+        return thresholds[2]
 
     def forward(self, ed: torch.Tensor) -> dict:
         """Classify each token into routing buckets.
@@ -96,21 +129,38 @@ class RoutingDecision(nn.Module):
                 route: [B, T] — 0=forward, 1=branch, 2=backward, 3=plastic
                 route_probs: [B, T, 4] — soft routing probabilities
         """
-        t1, t2, t3 = self.theta1, self.theta2, self.theta3
+        if self.training:
+            batch_thresholds = self._batch_thresholds(ed)
+            with torch.no_grad():
+                self.running_thresholds.mul_(1 - self.threshold_momentum).add_(
+                    batch_thresholds.to(self.running_thresholds.device, self.running_thresholds.dtype),
+                    alpha=self.threshold_momentum,
+                )
+                self.num_batches_tracked += 1
+            base_thresholds = self.running_thresholds.to(device=ed.device, dtype=ed.dtype)
+        elif self.num_batches_tracked.item() > 0:
+            base_thresholds = self.running_thresholds.to(device=ed.device, dtype=ed.dtype)
+        else:
+            base_thresholds = self._batch_thresholds(ed).to(device=ed.device, dtype=ed.dtype)
 
-        p_fwd = torch.sigmoid(5.0 * (t1 - ed))
-        p_branch = torch.sigmoid(5.0 * (ed - t1)) * torch.sigmoid(5.0 * (t2 - ed))
-        p_back = torch.sigmoid(5.0 * (ed - t2)) * torch.sigmoid(5.0 * (t3 - ed))
-        p_plastic = torch.sigmoid(5.0 * (ed - t3))
+        t1, t2, t3 = self._ordered_thresholds(base_thresholds)
+        left_width = (t2 - t1).clamp_min(1e-3)
+        right_width = (t3 - t2).clamp_min(1e-3)
+        centers = torch.stack(
+            [
+                t1 - left_width,
+                (t1 + t2) * 0.5,
+                (t2 + t3) * 0.5,
+                t3 + right_width,
+            ]
+        )
+        logits = -self.temperature * (ed.unsqueeze(-1) - centers).abs()
+        probs = torch.softmax(logits, dim=-1)
 
-        # Stack and normalize
-        probs = torch.stack([p_fwd, p_branch, p_back, p_plastic], dim=-1)  # [B, T, 4]
-        probs = probs / (probs.sum(dim=-1, keepdim=True) + 1e-8)
+        thresholds = torch.stack([t1, t2, t3])
+        route = torch.bucketize(ed, thresholds)
 
-        # Hard routing (argmax for inference, soft for training)
-        route = probs.argmax(dim=-1)  # [B, T]
-
-        return {"route": route, "route_probs": probs}
+        return {"route": route, "route_probs": probs, "thresholds": thresholds}
 
 
 class TokenEnergyBudget(nn.Module):

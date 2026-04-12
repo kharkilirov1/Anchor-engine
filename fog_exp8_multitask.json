@@ -1,0 +1,14 @@
+{
+  "Uniform": {
+    "mean_copy": 0.963,
+    "mean_reverse": 0.961,
+    "mean_retrieval": 0.941,
+    "mean_overall": 0.953
+  },
+  "FOG": {
+    "mean_copy": 0.964,
+    "mean_reverse": 0.964,
+    "mean_retrieval": 0.96,
+    "mean_overall": 0.962
+  }
+}

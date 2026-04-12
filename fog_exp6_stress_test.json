@@ -1,0 +1,42 @@
+{
+  "DistractorRetrieval": {
+    "Uniform": {
+      "acc": 0.9743076923076923,
+      "params": 456768
+    },
+    "FOG": {
+      "acc": 0.9756410256410256,
+      "params": 248784
+    }
+  },
+  "NoisyRetrieval": {
+    "Uniform": {
+      "acc": 0.9605714285714285,
+      "params": 456768
+    },
+    "FOG": {
+      "acc": 0.9608,
+      "params": 248784
+    }
+  },
+  "ChainedRetrieval": {
+    "Uniform": {
+      "acc": 0.951081081081081,
+      "params": 456768
+    },
+    "FOG": {
+      "acc": 0.9538378378378378,
+      "params": 248784
+    }
+  },
+  "ComposeArithmetic": {
+    "Uniform": {
+      "acc": 0.9245945945945946,
+      "params": 456768
+    },
+    "FOG": {
+      "acc": 0.9276756756756757,
+      "params": 248784
+    }
+  }
+}

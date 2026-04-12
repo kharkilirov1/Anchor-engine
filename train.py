@@ -1,9 +1,10 @@
 import argparse
 import json
-import math
 import os
+from dataclasses import replace
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from src.model.config import PRESETS, ModelConfig
 from src.model.abpt import ABPTModel
 from src.model.abpt_b import ABPTModelB
@@ -14,6 +15,7 @@ from src.data.anchor_synthetic import load_anchor_synthetic, AnchorSyntheticData
 from src.data.the_stack import load_the_stack, ByteCorpusDataset
 from src.data.the_stack_bpe import load_the_stack_bpe, BPETokenDataset
 from src.data.tinystories_bpe import load_tinystories_bpe
+from src.data.openwebmath_bpe import load_openwebmath_bpe
 
 
 _train_data: ShakespeareDataset | AnchorSyntheticDataset | ByteCorpusDataset | BPETokenDataset | None = None
@@ -32,6 +34,9 @@ def _init_data(
     tinystories_repo: str = "roneneldan/TinyStories",
     tinystories_bytes: int = 16_000_000,
     tinystories_vocab_size: int = 4096,
+    openwebmath_repo: str = "open-web-math/open-web-math",
+    openwebmath_bytes: int = 200_000,
+    openwebmath_vocab_size: int = 256,
 ):
     """Load requested dataset, else fall back to random."""
     global _train_data, _val_data
@@ -92,6 +97,23 @@ def _init_data(
         cfg.vocab_size = _train_data.vocab_size
         print(
             f"Data: tinystories-bpe | repo={tinystories_repo} "
+            f"| vocab={_train_data.vocab_size} | train={len(_train_data):,} "
+            f"| val={len(_val_data):,} tokens"
+        )
+        return
+
+    if dataset == "openwebmath-bpe":
+        _train_data, _val_data = load_openwebmath_bpe(
+            seq_len=cfg.max_seq_len,
+            device=device,
+            data_dir=data_dir,
+            repo_id=openwebmath_repo,
+            target_bytes=openwebmath_bytes,
+            vocab_size=openwebmath_vocab_size,
+        )
+        cfg.vocab_size = _train_data.vocab_size
+        print(
+            f"Data: openwebmath-bpe | repo={openwebmath_repo} "
             f"| vocab={_train_data.vocab_size} | train={len(_train_data):,} "
             f"| val={len(_val_data):,} tokens"
         )
@@ -185,7 +207,12 @@ def _summarize_step_metrics(
         rs = out["route_stats"][-1]
         metrics["mean_ed"] = float(rs["mean_ed"])
         metrics["route_forward"] = float(rs["forward"])
+        metrics["route_branch"] = float(rs["branch"])
         metrics["route_backward"] = float(rs["backward"])
+        metrics["route_plastic"] = float(rs["plastic"])
+        metrics["route_theta1"] = float(rs["theta1"])
+        metrics["route_theta2"] = float(rs["theta2"])
+        metrics["route_theta3"] = float(rs["theta3"])
     if "anchor_diagnostics" in out:
         diag = out["anchor_diagnostics"]
         metrics["anchors_active"] = float(diag["num_active"])
@@ -194,6 +221,11 @@ def _summarize_step_metrics(
         metrics["anchor_dead_end"] = float(diag["dead_end_count"])
     if "proposal_diagnostics" in out:
         diag = out["proposal_diagnostics"]
+        metrics["proposal_count"] = float(diag["proposal_count"])
+        metrics["proposal_non_baseline_count"] = float(diag.get("non_baseline_proposal_count", 0.0))
+        metrics["proposal_future_window_count"] = float(diag.get("future_window_count", 0.0))
+        metrics["proposal_rollout_count"] = float(diag.get("rollout_count", 0.0))
+        metrics["proposal_rollout_steps"] = float(diag.get("mean_rollout_steps", 0.0))
         metrics["proposal_influence"] = float(diag["anchors_with_proposal_influence"])
         metrics["proposal_blend"] = float(diag["mean_blend_ratio"])
         metrics["strong_retire_gap"] = float(diag["mean_strong_retire_gap"])
@@ -203,6 +235,32 @@ def _summarize_step_metrics(
             metrics["detector_alignment_loss"] = float(component_losses["detector_alignment_loss"].item())
         if "context_stability_loss" in component_losses:
             metrics["context_stability_loss"] = float(component_losses["context_stability_loss"].item())
+        if "proposal_score_loss" in component_losses:
+            metrics["proposal_score_loss"] = float(component_losses["proposal_score_loss"].item())
+        if "proposal_margin_loss" in component_losses:
+            metrics["proposal_margin_loss"] = float(component_losses["proposal_margin_loss"].item())
+        if "proposal_alignment_loss" in component_losses:
+            metrics["proposal_alignment_loss"] = float(component_losses["proposal_alignment_loss"].item())
+        if "proposal_counterfactual_loss" in component_losses:
+            metrics["proposal_counterfactual_loss"] = float(component_losses["proposal_counterfactual_loss"].item())
+        if "proposal_rollout_loss" in component_losses:
+            metrics["proposal_rollout_loss"] = float(component_losses["proposal_rollout_loss"].item())
+    if "proposal_aux_metrics" in out:
+        aux_metrics = out["proposal_aux_metrics"]
+        if "proposal_counterfactual_gain" in aux_metrics:
+            metrics["proposal_counterfactual_gain"] = float(aux_metrics["proposal_counterfactual_gain"].item())
+        if "proposal_counterfactual_current_ce" in aux_metrics:
+            metrics["proposal_counterfactual_current_ce"] = float(aux_metrics["proposal_counterfactual_current_ce"].item())
+        if "proposal_counterfactual_proposal_ce" in aux_metrics:
+            metrics["proposal_counterfactual_proposal_ce"] = float(aux_metrics["proposal_counterfactual_proposal_ce"].item())
+        if "proposal_counterfactual_count" in aux_metrics:
+            metrics["proposal_counterfactual_count"] = float(aux_metrics["proposal_counterfactual_count"].item())
+        if "proposal_rollout_gain" in aux_metrics:
+            metrics["proposal_rollout_gain"] = float(aux_metrics["proposal_rollout_gain"].item())
+        if "proposal_rollout_count" in aux_metrics:
+            metrics["proposal_rollout_count_aux"] = float(aux_metrics["proposal_rollout_count"].item())
+        if "proposal_rollout_depth" in aux_metrics:
+            metrics["proposal_rollout_depth"] = float(aux_metrics["proposal_rollout_depth"].item())
     return metrics
 
 
@@ -215,16 +273,49 @@ def _save_history(history: list[dict[str, float]], history_path: str) -> None:
 
 
 def _router_entropy_loss(route_probs: torch.Tensor) -> torch.Tensor:
-    """Auxiliary loss penalizing route distribution too far from target entropy.
+    raise NotImplementedError("Use _router_balance_loss instead.")
 
-    Encourages specialization (not uniform) while still using all routes.
-    target = log(2) ≈ 0.693 — ideal 50/50 split between two dominant routes.
-    """
-    target_entropy = math.log(2.0)
-    # route_probs: [B, T, 4] — mean over batch and sequence
-    mean_probs = route_probs.mean(dim=(0, 1))  # [4]
-    actual_entropy = -(mean_probs * (mean_probs + 1e-8).log()).sum()
-    return (actual_entropy - target_entropy).abs()
+
+def _router_balance_loss(route_probs: torch.Tensor, cfg: ModelConfig) -> torch.Tensor:
+    target = torch.tensor(
+        [
+            cfg.route_forward_target,
+            cfg.route_branch_target,
+            cfg.route_backward_target,
+            cfg.route_plastic_target,
+        ],
+        device=route_probs.device,
+        dtype=route_probs.dtype,
+    )
+    target = target / target.sum().clamp_min(1e-8)
+    mean_probs = route_probs.mean(dim=(0, 1))
+    return F.mse_loss(mean_probs, target)
+
+
+def _prepare_effective_cfg(cfg: ModelConfig, stage: str) -> ModelConfig:
+    effective_cfg = replace(cfg)
+    if stage == "b":
+        max_safe_warmup = max(0, effective_cfg.max_steps // 4)
+        effective_cfg.eq_warmup_steps = min(effective_cfg.eq_warmup_steps, max_safe_warmup)
+    return effective_cfg
+
+
+def _resolve_anchor_domain_mode(dataset: str) -> str:
+    if dataset == "anchor-synthetic":
+        return "synthetic"
+    return "real"
+
+
+def _resolve_fog_task_profile(dataset: str) -> str:
+    if dataset == "anchor-synthetic":
+        return "synthetic"
+    if dataset in {"the-stack", "the-stack-bpe"}:
+        return "code"
+    if dataset == "openwebmath-bpe":
+        return "math"
+    if dataset == "tinystories-bpe":
+        return "stories"
+    return "balanced"
 
 
 def train(
@@ -241,7 +332,11 @@ def train(
     tinystories_repo: str = "roneneldan/TinyStories",
     tinystories_bytes: int = 16_000_000,
     tinystories_vocab_size: int = 4096,
+    openwebmath_repo: str = "open-web-math/open-web-math",
+    openwebmath_bytes: int = 200_000,
+    openwebmath_vocab_size: int = 256,
 ):
+    cfg = _prepare_effective_cfg(cfg, stage)
     _init_data(
         cfg,
         device,
@@ -254,7 +349,14 @@ def train(
         tinystories_repo=tinystories_repo,
         tinystories_bytes=tinystories_bytes,
         tinystories_vocab_size=tinystories_vocab_size,
+        openwebmath_repo=openwebmath_repo,
+        openwebmath_bytes=openwebmath_bytes,
+        openwebmath_vocab_size=openwebmath_vocab_size,
     )
+    if stage == "anchor" and cfg.anchor_domain_mode == "auto":
+        cfg.anchor_domain_mode = _resolve_anchor_domain_mode(dataset)
+    if cfg.use_fog_flow and cfg.fog_task_profile == "auto":
+        cfg.fog_task_profile = _resolve_fog_task_profile(dataset)
     model = build_model(cfg, stage, device)
     history: list[dict[str, float]] = []
 
@@ -277,17 +379,11 @@ def train(
         loss = out["loss"]
 
         # Phase 0.4: router entropy auxiliary loss (Stage B only)
-        if stage == "b" and "route_stats" in out:
-            # Get route_probs from the last forward — need to recompute from model
-            # We add entropy loss on the diversity_loss channel
+        if stage == "b" and "last_route_probs" in out:
             last_eq = model.eq_signals[-1]
             if not last_eq.is_warming_up:
-                # Re-derive route_probs from last layer's ED
-                with torch.no_grad():
-                    eq_out = last_eq(out.get("_last_hidden", model.ln_final(x)))
-                route_out = model.router(eq_out["ed"])
-                ent_loss = _router_entropy_loss(route_out["route_probs"])
-                loss = loss + cfg.router_entropy_weight * ent_loss
+                balance_loss = _router_balance_loss(out["last_route_probs"], cfg)
+                loss = loss + cfg.router_entropy_weight * balance_loss
 
         optimizer.zero_grad()
         loss.backward()
@@ -295,9 +391,13 @@ def train(
         optimizer.step()
 
         if cfg.use_plastic and hasattr(model, "plastic"):
+            plastic_source = out.get("backbone_hidden", out.get("hidden"))
+            if isinstance(plastic_source, torch.Tensor):
+                for _ in range(max(cfg.plastic_train_updates, 0)):
+                    model.plastic.adapt_step(plastic_source.detach(), lr=cfg.plastic_lr)
             model.plastic.apply_decay()
 
-        if step % cfg.eval_interval == 0:
+        if step % cfg.eval_interval == 0 or step == cfg.max_steps - 1:
             # Train metrics
             bpb = bits_per_byte(out["ce_loss"].item())
             msg = f"step {step:5d} | loss {loss.item():.4f} | bpb {bpb:.4f}"
@@ -322,7 +422,13 @@ def train(
                 msg += f" | conf {out['confidence'].mean().item():.4f}"
             if "route_stats" in out and out["route_stats"]:
                 rs = out["route_stats"][-1]
-                msg += f" | ed={rs['mean_ed']:.3f} fwd={rs['forward']:.2f} bk={rs['backward']:.2f}"
+                msg += (
+                    f" | ed={rs['mean_ed']:.3f}"
+                    f" | fwd={rs['forward']:.2f}"
+                    f" | br={rs['branch']:.2f}"
+                    f" | bk={rs['backward']:.2f}"
+                    f" | pl={rs['plastic']:.2f}"
+                )
             if "anchor_diagnostics" in out:
                 anchor_diag = out["anchor_diagnostics"]
                 msg += (
@@ -334,6 +440,9 @@ def train(
             if "proposal_diagnostics" in out:
                 proposal_diag = out["proposal_diagnostics"]
                 msg += (
+                    f" | pcount {proposal_diag['proposal_count']}"
+                    f" | pnon {proposal_diag.get('non_baseline_proposal_count', 0)}"
+                    f" | proll {proposal_diag.get('rollout_count', 0)}"
                     f" | prop {proposal_diag['anchors_with_proposal_influence']}"
                     f" | blend {proposal_diag['mean_blend_ratio']:.3f}"
                     f" | srgap {proposal_diag['mean_strong_retire_gap']:.3f}"
@@ -344,6 +453,26 @@ def train(
                     msg += f" | dalign {component_losses['detector_alignment_loss'].item():.4f}"
                 if "context_stability_loss" in component_losses:
                     msg += f" | cstab {component_losses['context_stability_loss'].item():.4f}"
+                if "proposal_score_loss" in component_losses:
+                    msg += f" | pscore {component_losses['proposal_score_loss'].item():.4f}"
+                if "proposal_margin_loss" in component_losses:
+                    msg += f" | pmargin {component_losses['proposal_margin_loss'].item():.4f}"
+                if "proposal_alignment_loss" in component_losses:
+                    msg += f" | palign {component_losses['proposal_alignment_loss'].item():.4f}"
+                if "proposal_counterfactual_loss" in component_losses:
+                    msg += f" | pcf {component_losses['proposal_counterfactual_loss'].item():.4f}"
+                if "proposal_rollout_loss" in component_losses:
+                    msg += f" | prolloss {component_losses['proposal_rollout_loss'].item():.4f}"
+            if "proposal_aux_metrics" in out:
+                aux_metrics = out["proposal_aux_metrics"]
+                if "proposal_counterfactual_gain" in aux_metrics:
+                    msg += f" | pcfgain {aux_metrics['proposal_counterfactual_gain'].item():+.4f}"
+                if "proposal_counterfactual_count" in aux_metrics:
+                    msg += f" | pcfn {aux_metrics['proposal_counterfactual_count'].item():.1f}"
+                if "proposal_rollout_gain" in aux_metrics:
+                    msg += f" | prolgain {aux_metrics['proposal_rollout_gain'].item():+.4f}"
+                if "proposal_rollout_depth" in aux_metrics:
+                    msg += f" | proldep {aux_metrics['proposal_rollout_depth'].item():.1f}"
             print(msg)
             step_metrics = _summarize_step_metrics(
                 out=out,
@@ -385,7 +514,7 @@ if __name__ == "__main__":
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--stage", default="a", choices=["a", "b", "anchor"])
     parser.add_argument("--data_dir", default="data_cache")
-    parser.add_argument("--dataset", default="shakespeare", choices=["shakespeare", "anchor-synthetic", "the-stack", "the-stack-bpe", "tinystories-bpe"])
+    parser.add_argument("--dataset", default="shakespeare", choices=["shakespeare", "anchor-synthetic", "the-stack", "the-stack-bpe", "tinystories-bpe", "openwebmath-bpe"])
     parser.add_argument("--the_stack_repo", default="bigcode/the-stack-smol-xs")
     parser.add_argument("--the_stack_lang", default="python")
     parser.add_argument("--the_stack_bytes", type=int, default=8_000_000)
@@ -393,6 +522,9 @@ if __name__ == "__main__":
     parser.add_argument("--tinystories_repo", default="roneneldan/TinyStories")
     parser.add_argument("--tinystories_bytes", type=int, default=16_000_000)
     parser.add_argument("--tinystories_vocab_size", type=int, default=4096)
+    parser.add_argument("--openwebmath_repo", default="open-web-math/open-web-math")
+    parser.add_argument("--openwebmath_bytes", type=int, default=200_000)
+    parser.add_argument("--openwebmath_vocab_size", type=int, default=256)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--eval_interval", type=int, default=None)
     parser.add_argument("--seq_len", type=int, default=None)
@@ -400,7 +532,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample", action="store_true", help="Generate sample text after training")
     args = parser.parse_args()
 
-    cfg = PRESETS[args.preset]
+    cfg = replace(PRESETS[args.preset])
     if args.steps is not None:
         cfg.max_steps = args.steps
     if args.batch_size is not None:
@@ -423,6 +555,9 @@ if __name__ == "__main__":
         args.tinystories_repo,
         args.tinystories_bytes,
         args.tinystories_vocab_size,
+        args.openwebmath_repo,
+        args.openwebmath_bytes,
+        args.openwebmath_vocab_size,
     )
 
     if args.sample and _train_data is not None:

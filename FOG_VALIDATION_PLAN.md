@@ -26,3 +26,36 @@ This document outlines the experimental plan to validate the **FOG (Finite Opera
 **Objective:** Identify the exact parameter scale where uniform architectures fail due to polysemanticity overload, and show that FOG pushes this boundary lower.
 * **Method:** Sweep $d_{model}$ downwards (e.g., 128 $\to$ 64 $\to$ 32 $\to$ 16).
 * **Expected Result:** FOG sustains $>95\%$ accuracy on `Retrieval` at a significantly lower $d_{model}$ than the Baseline, proving superior parameter efficiency via morphological specialization.
+
+## Experiment 5: Motif Signatures Extraction (Activation & Attention)
+**Objective:** Verify that specific cognitive motifs ($\Phi^{(\mathrm{compare})}$, $\Phi^{(\mathrm{memory})}$, $\Phi^{(\mathrm{select})}$) naturally emerge in trained FOG models and can be identified by their mathematical signatures.
+* **Method:** Train a FOG model on algorithmic tasks (`Copy`, `Reverse`, `Retrieval`). Hook into the forward pass to extract Attention weights (measure entropy) and MFFN gate values (measure polarization/sparsity) at each layer.
+* **Expected Result:** Different layers will exhibit distinct, specialized behaviors. For example, early layers might show low attention entropy (sharp focus) acting as a "Compare/Read" motif, while deeper layers exhibit high entropy and high gate polarization, acting as "Memory/Select" motifs.
+
+## Experiment 6: Complex Motif Composition Stress Test
+**Objective:** Prove that heterogenous subspace allocation allows FOG to chain cognitive motifs (e.g., retrieve $\to$ filter $\to$ compose) without destructive interference, while uniform baselines fail on complex compositional tasks under tight parameter budgets (~400K).
+* **Tasks:**
+  1. `DistractorRetrieval` (precise comparison)
+  2. `NoisyRetrieval` (noise filtering / selection)
+  3. `ChainedRetrieval` (two-hop memory lookup)
+  4. `SetIntersection` (parallel scan and array output)
+* **Method:** Train parameter-matched Uniform and FOG models on these complex tasks.
+* **Expected Result:** FOG will successfully converge on compositional tasks (like `ChainedRetrieval`) due to isolated motif subspaces. The Uniform baseline will experience catastrophic interference and stall at near-random performance.
+
+## Experiment 7: Multi-Task Interference (Continual Learning Analog)
+**Objective:** Prove that FOG reduces destructive interference when a model is forced to learn fundamentally different cognitive tasks simultaneously within a constrained parameter budget.
+* **Tasks:** A single mixed dataset containing `Copy`, `Reverse`, and `Retrieval` tasks multiplexed.
+* **Method:** Train Uniform Baseline (~450K) and FOG Motif (~250K) on the mixed dataset. Measure final accuracy on each individual sub-task.
+* **Expected Result:** Uniform models will suffer from representation collapse on specific sub-tasks (usually `Retrieval`, which requires broad attention) because the sharp attention required for `Copy` overwrites shared subspaces. FOG will maintain high accuracy across all tasks because its specialized geometric pathways (`d_compare`, `d_memory`) naturally decouple the operations without interference.
+
+## Experiment 8: Scale-Up Validation (10M+ Parameters)
+**Objective:** Demonstrate that the morphological advantages (parameter efficiency, computational separation) of FOG are not artifacts of micro-scale models (<1M parameters), but scale robustly to larger parameter regimes and substantially more complex data distributions.
+* **Tasks:** Complex Retrieval and Chained Retrieval with a vastly expanded vocabulary ($V=1024$) and longer contexts ($L=128$, up to 32 key-value pairs).
+* **Method:** Train a Uniform Baseline and a FOG Motif model (both parameter-matched at ~10M parameters) on CPU. 
+* **Expected Result:** At the 10M scale with long context and large vocabulary, the monolithic Uniform architecture will struggle with "attention dilution" and memory bottlenecks. FOG, by expanding its $\Phi^{(\mathrm{memory})}$ subspace and keeping $\Phi^{(\mathrm{compare})}$ sharply constrained, will achieve higher accuracy and faster convergence, proving the hypothesis holds at scale.
+
+## Experiment 9: Causal Motif Intervention (Knockout Analysis)
+**Objective:** Move beyond observational signatures (entropy) and prove *causality*. Demonstrate that specific geometric pathways (e.g., specific attention heads or gating layers) are causally responsible for specific cognitive motifs.
+* **Tasks:** A multi-task setup combining `Copy` (requires sharp compare) and `Retrieval` (requires broad memory).
+* **Method:** Train a FOG model to high accuracy on both tasks. During inference, systematically apply "knockouts" (zeroing out specific attention heads or FFN gates). Measure the differential impact ($\Delta$Accuracy) on the two tasks.
+* **Expected Result:** We will observe a double dissociation. Knocking out "sharp" early-layer heads will catastrophically degrade `Copy` while leaving `Retrieval` relatively intact. Knocking out "broad" deep-layer memory heads or polarizing gates will catastrophically degrade `Retrieval` while leaving `Copy` intact. This causally proves morphological specialization.

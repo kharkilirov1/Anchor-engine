@@ -26,6 +26,13 @@ def test_build_model_supports_anchor_stage():
     assert isinstance(model_anchor, ABPTAnchorV1)
 
 
+def test_stage_b_short_runs_cap_eq_warmup():
+    cfg = replace(TOY_CONFIG, max_steps=8, eq_warmup_steps=50)
+    effective = train_module._prepare_effective_cfg(cfg, stage="b")
+    assert effective.eq_warmup_steps == 2
+    assert cfg.eq_warmup_steps == 50
+
+
 def test_train_anchor_stage_runs_on_random_data(tmp_path):
     _reset_train_data()
     cfg = replace(
@@ -268,6 +275,45 @@ def test_train_anchor_stage_runs_on_cached_tinystories_bpe_data(tmp_path):
         tinystories_repo="roneneldan/TinyStories",
         tinystories_bytes=1024,
         tinystories_vocab_size=128,
+    )
+
+    assert isinstance(model, ABPTAnchorV1)
+    assert len(model.training_history) == 1
+    assert "anchors_active" in model.training_history[0]
+
+
+def test_train_anchor_stage_runs_on_cached_openwebmath_bpe_data(tmp_path):
+    _reset_train_data()
+    prefix = "open_web_math__open_web_math_1024_bpe128"
+    from tokenizers import Tokenizer, decoders, models, pre_tokenizers
+    tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
+    tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    tokenizer.decoder = decoders.ByteLevel()
+    tokenizer.add_special_tokens(["[PAD]", "[UNK]", "[BOS]", "[EOS]"])
+    tokenizer.add_tokens(["Theorem", "proof", "integral", "limit"])
+    tokenizer.save(str(tmp_path / f"{prefix}_tokenizer.json"))
+    torch_mod = __import__("torch")
+    torch_mod.save(torch_mod.tensor([i % 128 for i in range(512)], dtype=torch_mod.long), tmp_path / f"{prefix}_ids.pt")
+    (tmp_path / f"{prefix}_meta.json").write_text('{"vocab_size": 128, "token_count": 512}', encoding="utf-8")
+
+    cfg = replace(
+        TOY_CONFIG,
+        vocab_size=64,
+        max_seq_len=16,
+        batch_size=2,
+        eval_interval=1,
+        max_steps=1,
+    )
+
+    model = train_module.train(
+        cfg,
+        device="cpu",
+        stage="anchor",
+        data_dir=str(tmp_path),
+        dataset="openwebmath-bpe",
+        openwebmath_repo="open-web-math/open-web-math",
+        openwebmath_bytes=1024,
+        openwebmath_vocab_size=128,
     )
 
     assert isinstance(model, ABPTAnchorV1)

@@ -14,6 +14,8 @@ class Verifier(nn.Module):
         self.cfg = cfg
         self.entropy_w = cfg.verifier_entropy_weight
         self.agreement_w = cfg.verifier_agreement_weight
+        self.consistency_w = cfg.verifier_consistency_weight
+        self.temperature = cfg.verifier_temperature
 
     def _entropy(self, logits: torch.Tensor) -> torch.Tensor:
         """Per-position entropy. Lower = more confident. [B, T]"""
@@ -31,6 +33,13 @@ class Verifier(nn.Module):
             agreements.append(cos)
         return torch.stack(agreements, dim=-1)
 
+    def _consistency(self, logits: torch.Tensor) -> torch.Tensor:
+        probs = F.softmax(logits, dim=-1)
+        topk = torch.topk(probs, k=min(2, probs.size(-1)), dim=-1).values
+        if topk.size(-1) == 1:
+            return topk[..., 0]
+        return topk[..., 0] - topk[..., 1]
+
     def forward(self, branch_logits: list[torch.Tensor]) -> dict:
         # Entropy score per branch: lower entropy = higher score
         entropies = torch.stack(
@@ -40,10 +49,19 @@ class Verifier(nn.Module):
         entropy_scores = 1.0 - entropies / max_ent  # [B, T, N]
 
         agreement_scores = self._agreement(branch_logits)  # [B, T, N]
+        consistency_scores = torch.stack(
+            [self._consistency(bl) for bl in branch_logits],
+            dim=-1,
+        )  # [B, T, N]
 
-        scores = self.entropy_w * entropy_scores + self.agreement_w * agreement_scores
+        score_denom = max(self.entropy_w + self.agreement_w + self.consistency_w, 1e-8)
+        scores = (
+            self.entropy_w * entropy_scores
+            + self.agreement_w * agreement_scores
+            + self.consistency_w * consistency_scores
+        ) / score_denom
 
-        branch_weights = F.softmax(scores * 5.0, dim=-1)  # [B, T, N]
+        branch_weights = F.softmax(scores * self.temperature, dim=-1)  # [B, T, N]
 
         stacked = torch.stack(branch_logits, dim=-2)  # [B, T, N, V]
         weighted_logits = (stacked * branch_weights.unsqueeze(-1)).sum(dim=-2)
@@ -56,4 +74,5 @@ class Verifier(nn.Module):
             "branch_weights": branch_weights,
             "entropy_scores": entropy_scores,
             "agreement_scores": agreement_scores,
+            "consistency_scores": consistency_scores,
         }

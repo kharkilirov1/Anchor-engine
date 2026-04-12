@@ -23,6 +23,16 @@ def test_plastic_adapts_at_inference():
     assert not torch.allclose(out1, out2, atol=1e-7)
 
 
+def test_plastic_adapt_step_returns_metrics():
+    cfg = replace(TOY_CONFIG)
+    plastic = PlasticLayer(cfg)
+    x = torch.randn(2, 6, cfg.d_model)
+    metrics = plastic.adapt_step(x, lr=1e-3)
+    assert "loss" in metrics
+    assert "denoise_loss" in metrics
+    assert "l2_loss" in metrics
+
+
 def test_plastic_decay():
     cfg = replace(TOY_CONFIG)
     plastic = PlasticLayer(cfg)

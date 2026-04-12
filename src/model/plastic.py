@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from src.model.config import ModelConfig
 
 
@@ -30,20 +31,34 @@ class PlasticLayer(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.adapter(x)
 
-    def adapt_step(self, x: torch.Tensor, lr: float | None = None):
-        """One gradient step of self-supervised adaptation."""
+    def _corrupt(self, x: torch.Tensor) -> torch.Tensor:
+        noisy = x.detach()
+        if self.cfg.plastic_mask_ratio > 0.0:
+            keep = (
+                torch.rand(*x.shape[:-1], 1, device=x.device) > self.cfg.plastic_mask_ratio
+            ).to(x.dtype)
+            noisy = noisy * keep
+        if self.cfg.plastic_noise_scale > 0.0:
+            noisy = noisy + self.cfg.plastic_noise_scale * torch.randn_like(noisy)
+        return noisy
+
+    def adapt_step(self, x: torch.Tensor, lr: float | None = None) -> dict[str, float]:
+        """One gradient step of denoising-style self-supervised adaptation."""
         if lr is None:
             lr = self.cfg.plastic_lr
 
         self.adapter.train()
-        adapted = self.adapter(x.detach())
+        self.adapter.zero_grad(set_to_none=True)
+        target = x.detach()
+        corrupted = self._corrupt(target)
+        reconstructed = corrupted + self.adapter(corrupted)
 
-        loss = (adapted**2).mean()
+        denoise_loss = F.mse_loss(reconstructed, target)
 
         l2_loss = torch.tensor(0.0, device=x.device)
         for n, p in self.adapter.named_parameters():
             l2_loss = l2_loss + ((p - self.initial_state[n].to(p.device)) ** 2).mean()
-        loss = loss + self.cfg.plastic_l2_weight * l2_loss
+        loss = denoise_loss + self.cfg.plastic_l2_weight * l2_loss
 
         loss.backward()
         with torch.no_grad():
@@ -51,6 +66,11 @@ class PlasticLayer(nn.Module):
                 if p.grad is not None:
                     p.add_(p.grad, alpha=-lr)
                     p.grad.zero_()
+        return {
+            "loss": float(loss.item()),
+            "denoise_loss": float(denoise_loss.item()),
+            "l2_loss": float(l2_loss.item()),
+        }
 
     def apply_decay(self, decay_rate: float | None = None):
         """Exponential decay toward initial state."""

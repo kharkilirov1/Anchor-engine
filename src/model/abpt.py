@@ -34,6 +34,8 @@ class ABPTModel(nn.Module):
 
         backbone_out = self.backbone(input_ids)
         hidden = backbone_out["hidden"]
+        result["backbone_hidden"] = hidden
+        result["layer_outputs"] = backbone_out["layer_outputs"]
 
         if self.cfg.use_plastic:
             hidden = self.plastic(hidden)
@@ -53,6 +55,7 @@ class ABPTModel(nn.Module):
         else:
             logits = self.lm_head(hidden)
 
+        result["hidden"] = hidden
         result["logits"] = logits
 
         if targets is not None:

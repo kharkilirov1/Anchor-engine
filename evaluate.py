@@ -1,5 +1,6 @@
 import argparse
 from collections import defaultdict
+from dataclasses import replace
 
 import torch
 
@@ -22,6 +23,9 @@ def evaluate(
     tinystories_repo: str = "roneneldan/TinyStories",
     tinystories_bytes: int = 16_000_000,
     tinystories_vocab_size: int = 4096,
+    openwebmath_repo: str = "open-web-math/open-web-math",
+    openwebmath_bytes: int = 200_000,
+    openwebmath_vocab_size: int = 256,
 ) -> dict[str, float]:
     _init_data(
         cfg,
@@ -35,6 +39,9 @@ def evaluate(
         tinystories_repo=tinystories_repo,
         tinystories_bytes=tinystories_bytes,
         tinystories_vocab_size=tinystories_vocab_size,
+        openwebmath_repo=openwebmath_repo,
+        openwebmath_bytes=openwebmath_bytes,
+        openwebmath_vocab_size=openwebmath_vocab_size,
     )
     model = build_model(cfg, stage, device)
     model.eval()
@@ -67,11 +74,17 @@ def evaluate(
                 totals["proposal_influence"] += float(diag["anchors_with_proposal_influence"])
                 totals["proposal_blend"] += float(diag["mean_blend_ratio"])
                 totals["strong_retire_gap"] += float(diag["mean_strong_retire_gap"])
+                totals["proposal_rollout_count"] += float(diag.get("rollout_count", 0.0))
+                totals["proposal_rollout_steps"] += float(diag.get("mean_rollout_steps", 0.0))
             if "component_losses" in out:
                 for name, value in out["component_losses"].items():
                     if name == "ce_loss":
                         continue
                     totals[f"component_{name}"] += float(value.item())
+            if "proposal_aux_metrics" in out:
+                for name, value in out["proposal_aux_metrics"].items():
+                    key = "proposal_rollout_count_aux" if name == "proposal_rollout_count" else name
+                    totals[key] += float(value.item())
 
     metrics = {
         "loss": totals["loss"] / num_batches,
@@ -94,8 +107,14 @@ def evaluate(
         metrics["proposal_influence"] = totals["proposal_influence"] / num_batches
         metrics["proposal_blend"] = totals["proposal_blend"] / num_batches
         metrics["strong_retire_gap"] = totals["strong_retire_gap"] / num_batches
+        metrics["proposal_rollout_count"] = totals["proposal_rollout_count"] / num_batches
+        metrics["proposal_rollout_steps"] = totals["proposal_rollout_steps"] / num_batches
     for name, value in totals.items():
-        if not name.startswith("component_"):
+        if (
+            not name.startswith("component_")
+            and not name.startswith("proposal_counterfactual_")
+            and not name.startswith("proposal_rollout_")
+        ):
             continue
         metrics[name] = value / num_batches
 
@@ -108,7 +127,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--stage", default="a", choices=["a", "b", "anchor"])
     parser.add_argument("--data_dir", default="data_cache")
-    parser.add_argument("--dataset", default="shakespeare", choices=["shakespeare", "anchor-synthetic", "the-stack", "the-stack-bpe", "tinystories-bpe"])
+    parser.add_argument("--dataset", default="shakespeare", choices=["shakespeare", "anchor-synthetic", "the-stack", "the-stack-bpe", "tinystories-bpe", "openwebmath-bpe"])
     parser.add_argument("--the_stack_repo", default="bigcode/the-stack-smol-xs")
     parser.add_argument("--the_stack_lang", default="python")
     parser.add_argument("--the_stack_bytes", type=int, default=8_000_000)
@@ -116,12 +135,15 @@ if __name__ == "__main__":
     parser.add_argument("--tinystories_repo", default="roneneldan/TinyStories")
     parser.add_argument("--tinystories_bytes", type=int, default=16_000_000)
     parser.add_argument("--tinystories_vocab_size", type=int, default=4096)
+    parser.add_argument("--openwebmath_repo", default="open-web-math/open-web-math")
+    parser.add_argument("--openwebmath_bytes", type=int, default=200_000)
+    parser.add_argument("--openwebmath_vocab_size", type=int, default=256)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--seq_len", type=int, default=None)
     parser.add_argument("--batches", type=int, default=4)
     args = parser.parse_args()
 
-    cfg = PRESETS[args.preset]
+    cfg = replace(PRESETS[args.preset])
     if args.batch_size is not None:
         cfg.batch_size = args.batch_size
     if args.seq_len is not None:
@@ -140,5 +162,8 @@ if __name__ == "__main__":
         tinystories_repo=args.tinystories_repo,
         tinystories_bytes=args.tinystories_bytes,
         tinystories_vocab_size=args.tinystories_vocab_size,
+        openwebmath_repo=args.openwebmath_repo,
+        openwebmath_bytes=args.openwebmath_bytes,
+        openwebmath_vocab_size=args.openwebmath_vocab_size,
     )
     print(metrics)

@@ -1,0 +1,80 @@
+{
+  "Copy": {
+    "layer_0": {
+      "attention_entropy": 0.647,
+      "gate_polarization": 0.006,
+      "inferred_attention_motif": "COMPARE (Sharp)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_1": {
+      "attention_entropy": 1.207,
+      "gate_polarization": 0.015,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_2": {
+      "attention_entropy": 2.06,
+      "gate_polarization": 0.074,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_3": {
+      "attention_entropy": 1.993,
+      "gate_polarization": 0.127,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    }
+  },
+  "Reverse": {
+    "layer_0": {
+      "attention_entropy": 0.895,
+      "gate_polarization": 0.006,
+      "inferred_attention_motif": "COMPARE (Sharp)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_1": {
+      "attention_entropy": 1.289,
+      "gate_polarization": 0.012,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_2": {
+      "attention_entropy": 2.015,
+      "gate_polarization": 0.06,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_3": {
+      "attention_entropy": 2.148,
+      "gate_polarization": 0.121,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    }
+  },
+  "Retrieval": {
+    "layer_0": {
+      "attention_entropy": 1.341,
+      "gate_polarization": 0.078,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_1": {
+      "attention_entropy": 1.432,
+      "gate_polarization": 0.105,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_2": {
+      "attention_entropy": 1.064,
+      "gate_polarization": 0.129,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    },
+    "layer_3": {
+      "attention_entropy": 1.459,
+      "gate_polarization": 0.137,
+      "inferred_attention_motif": "MEMORY (Broad)",
+      "inferred_ffn_motif": "TRANSFORM (Soft)"
+    }
+  }
+}

@@ -1,0 +1,286 @@
+{
+  "Uniform": {
+    "head_drops": [
+      {
+        "layer": 0,
+        "head": 0,
+        "drop_copy": 0.0211,
+        "drop_reverse": -0.0099,
+        "drop_retrieval": 0.0027
+      },
+      {
+        "layer": 0,
+        "head": 1,
+        "drop_copy": 0.0528,
+        "drop_reverse": 0.0127,
+        "drop_retrieval": 0.0014
+      },
+      {
+        "layer": 0,
+        "head": 2,
+        "drop_copy": 0.0326,
+        "drop_reverse": -0.0131,
+        "drop_retrieval": 0.028
+      },
+      {
+        "layer": 0,
+        "head": 3,
+        "drop_copy": 0.0371,
+        "drop_reverse": 0.0292,
+        "drop_retrieval": 0.0114
+      },
+      {
+        "layer": 1,
+        "head": 0,
+        "drop_copy": 0.0461,
+        "drop_reverse": 0.0589,
+        "drop_retrieval": 0.001
+      },
+      {
+        "layer": 1,
+        "head": 1,
+        "drop_copy": 0.1092,
+        "drop_reverse": -0.0485,
+        "drop_retrieval": 0.058
+      },
+      {
+        "layer": 1,
+        "head": 2,
+        "drop_copy": 0.0264,
+        "drop_reverse": 0.0054,
+        "drop_retrieval": 0.0972
+      },
+      {
+        "layer": 1,
+        "head": 3,
+        "drop_copy": 0.0952,
+        "drop_reverse": -0.0119,
+        "drop_retrieval": 0.0004
+      },
+      {
+        "layer": 2,
+        "head": 0,
+        "drop_copy": 0.0927,
+        "drop_reverse": 0.0537,
+        "drop_retrieval": -0.0004
+      },
+      {
+        "layer": 2,
+        "head": 1,
+        "drop_copy": 0.0012,
+        "drop_reverse": -0.003,
+        "drop_retrieval": 0.0003
+      },
+      {
+        "layer": 2,
+        "head": 2,
+        "drop_copy": 0.0817,
+        "drop_reverse": 0.0697,
+        "drop_retrieval": -0.0008
+      },
+      {
+        "layer": 2,
+        "head": 3,
+        "drop_copy": 0.0065,
+        "drop_reverse": -0.0077,
+        "drop_retrieval": -0.0002
+      },
+      {
+        "layer": 3,
+        "head": 0,
+        "drop_copy": -0.0022,
+        "drop_reverse": 0.0038,
+        "drop_retrieval": -0.0003
+      },
+      {
+        "layer": 3,
+        "head": 1,
+        "drop_copy": 0.0018,
+        "drop_reverse": -0.002,
+        "drop_retrieval": 0.0002
+      },
+      {
+        "layer": 3,
+        "head": 2,
+        "drop_copy": -0.0004,
+        "drop_reverse": -0.0002,
+        "drop_retrieval": 0.0
+      },
+      {
+        "layer": 3,
+        "head": 3,
+        "drop_copy": 0.0012,
+        "drop_reverse": 0.0004,
+        "drop_retrieval": 0.0001
+      }
+    ],
+    "gate_drops": [
+      {
+        "layer": 0,
+        "drop_copy": 0.1855,
+        "drop_reverse": 0.1576,
+        "drop_retrieval": 0.2116
+      },
+      {
+        "layer": 1,
+        "drop_copy": 0.0024,
+        "drop_reverse": 0.0133,
+        "drop_retrieval": 0.0063
+      },
+      {
+        "layer": 2,
+        "drop_copy": 0.0167,
+        "drop_reverse": 0.0001,
+        "drop_retrieval": 0.0031
+      },
+      {
+        "layer": 3,
+        "drop_copy": 0.0169,
+        "drop_reverse": 0.0003,
+        "drop_retrieval": 0.0019
+      }
+    ]
+  },
+  "FOG": {
+    "head_drops": [
+      {
+        "layer": 0,
+        "head": 0,
+        "drop_copy": 0.0565,
+        "drop_reverse": -0.0185,
+        "drop_retrieval": 0.0414
+      },
+      {
+        "layer": 0,
+        "head": 1,
+        "drop_copy": 0.0728,
+        "drop_reverse": -0.0402,
+        "drop_retrieval": 0.001
+      },
+      {
+        "layer": 0,
+        "head": 2,
+        "drop_copy": 0.0858,
+        "drop_reverse": 0.0022,
+        "drop_retrieval": 0.0019
+      },
+      {
+        "layer": 0,
+        "head": 3,
+        "drop_copy": 0.0489,
+        "drop_reverse": -0.0147,
+        "drop_retrieval": 0.0026
+      },
+      {
+        "layer": 1,
+        "head": 0,
+        "drop_copy": 0.0851,
+        "drop_reverse": 0.0926,
+        "drop_retrieval": 0.0021
+      },
+      {
+        "layer": 1,
+        "head": 1,
+        "drop_copy": 0.0455,
+        "drop_reverse": 0.0367,
+        "drop_retrieval": 0.0174
+      },
+      {
+        "layer": 1,
+        "head": 2,
+        "drop_copy": 0.0259,
+        "drop_reverse": -0.0035,
+        "drop_retrieval": 0.0104
+      },
+      {
+        "layer": 1,
+        "head": 3,
+        "drop_copy": 0.1254,
+        "drop_reverse": 0.0929,
+        "drop_retrieval": 0.0943
+      },
+      {
+        "layer": 2,
+        "head": 0,
+        "drop_copy": 0.0,
+        "drop_reverse": 0.0136,
+        "drop_retrieval": 0.0003
+      },
+      {
+        "layer": 2,
+        "head": 1,
+        "drop_copy": 0.1508,
+        "drop_reverse": 0.0952,
+        "drop_retrieval": 0.0032
+      },
+      {
+        "layer": 2,
+        "head": 2,
+        "drop_copy": 0.1231,
+        "drop_reverse": 0.1413,
+        "drop_retrieval": 0.0231
+      },
+      {
+        "layer": 2,
+        "head": 3,
+        "drop_copy": 0.0504,
+        "drop_reverse": -0.0324,
+        "drop_retrieval": 0.0234
+      },
+      {
+        "layer": 3,
+        "head": 0,
+        "drop_copy": 0.0001,
+        "drop_reverse": 0.0021,
+        "drop_retrieval": 0.0007
+      },
+      {
+        "layer": 3,
+        "head": 1,
+        "drop_copy": 0.0517,
+        "drop_reverse": 0.0931,
+        "drop_retrieval": 0.0003
+      },
+      {
+        "layer": 3,
+        "head": 2,
+        "drop_copy": -0.0026,
+        "drop_reverse": 0.0038,
+        "drop_retrieval": -0.0003
+      },
+      {
+        "layer": 3,
+        "head": 3,
+        "drop_copy": 0.0019,
+        "drop_reverse": 0.0013,
+        "drop_retrieval": 0.0003
+      }
+    ],
+    "gate_drops": [
+      {
+        "layer": 0,
+        "drop_copy": 0.1476,
+        "drop_reverse": 0.1773,
+        "drop_retrieval": 0.0719
+      },
+      {
+        "layer": 1,
+        "drop_copy": 0.0653,
+        "drop_reverse": 0.0298,
+        "drop_retrieval": 0.0057
+      },
+      {
+        "layer": 2,
+        "drop_copy": 0.0054,
+        "drop_reverse": 0.0172,
+        "drop_retrieval": 0.0178
+      },
+      {
+        "layer": 3,
+        "drop_copy": 0.025,
+        "drop_reverse": 0.0149,
+        "drop_retrieval": 0.0005
+      }
+    ]
+  }
+}

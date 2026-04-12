@@ -46,7 +46,17 @@ class ABPTModelB(nn.Module):
             EquilibriumSignal(cfg.d_model, momentum=cfg.eq_momentum, warmup_steps=cfg.eq_warmup_steps)
             for _ in range(cfg.n_layers)
         ])
-        self.router = RoutingDecision()
+        self.router = RoutingDecision(
+            target_fractions=(
+                cfg.route_forward_target,
+                cfg.route_branch_target,
+                cfg.route_backward_target,
+                cfg.route_plastic_target,
+            ),
+            threshold_momentum=cfg.route_threshold_momentum,
+            temperature=cfg.route_temperature,
+            offset_scale=cfg.route_threshold_offset_scale,
+        )
         self.energy = TokenEnergyBudget()
 
         # Stage A modules — activated selectively by routing
@@ -81,16 +91,16 @@ class ABPTModelB(nn.Module):
             # Compute equilibrium signal
             eq_out = self.eq_signals[i](x)
             ed = eq_out["ed"]  # [B, T]
+            route_preview = self.router(ed)
+            thresholds = route_preview["thresholds"]
 
             # During warmup: force all tokens to forward (accumulate stats only)
             if eq_out.get("warming_up", False):
                 route = torch.zeros(B, T, dtype=torch.long, device=x.device)
-                route_probs = torch.zeros(B, T, 4, device=x.device)
-                route_probs[..., 0] = 1.0
+                route_probs = route_preview["route_probs"]
             else:
-                route_out = self.router(ed)
-                route = route_out["route"]  # [B, T]: 0=fwd, 1=branch, 2=back, 3=plastic
-                route_probs = route_out["route_probs"]
+                route = route_preview["route"]  # [B, T]: 0=fwd, 1=branch, 2=back, 3=plastic
+                route_probs = route_preview["route_probs"]
 
             # Collect stats
             total = route.numel()
@@ -100,6 +110,9 @@ class ABPTModelB(nn.Module):
                 "backward": (route == 2).sum().item() / total,
                 "plastic": (route == 3).sum().item() / total,
                 "mean_ed": ed.mean().item(),
+                "theta1": thresholds[0].item(),
+                "theta2": thresholds[1].item(),
+                "theta3": thresholds[2].item(),
             }
             all_route_stats.append(stats)
 
@@ -165,6 +178,9 @@ class ABPTModelB(nn.Module):
 
         result["logits"] = logits
         result["route_stats"] = all_route_stats
+        result["last_route_probs"] = route_probs
+        result["last_route_thresholds"] = thresholds
+        result["hidden"] = hidden
 
         # Loss
         if targets is not None:

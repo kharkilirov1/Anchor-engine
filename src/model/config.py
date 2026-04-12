@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -19,12 +19,14 @@ class ModelConfig:
     use_branches: bool = True
     n_branches: int = 2
     diversity_weight: float = 0.1
+    branch_diversity_target: float = 0.08
 
     # Verifier
     use_verifier: bool = True
     verifier_entropy_weight: float = 0.4
     verifier_agreement_weight: float = 0.4
     verifier_consistency_weight: float = 0.2
+    verifier_temperature: float = 4.0
 
     # Plastic Layer
     use_plastic: bool = True
@@ -32,6 +34,9 @@ class ModelConfig:
     plastic_decay: float = 0.99
     plastic_l2_weight: float = 0.01
     plastic_hidden: int = 64
+    plastic_noise_scale: float = 0.05
+    plastic_mask_ratio: float = 0.15
+    plastic_train_updates: int = 1
 
     # Equilibrium / Routing (Phase 0)
     eq_momentum: float = 0.1
@@ -39,11 +44,25 @@ class ModelConfig:
     router_lr: float = 3e-5
     router_warmup_steps: int = 500
     router_entropy_weight: float = 0.01
+    route_temperature: float = 8.0
+    route_threshold_momentum: float = 0.2
+    route_threshold_offset_scale: float = 0.2
+    route_forward_target: float = 0.55
+    route_branch_target: float = 0.25
+    route_backward_target: float = 0.15
+    route_plastic_target: float = 0.05
 
     # Anchor V1
+    use_fog_flow: bool = False
+    fog_task_profile: str = "auto"
+    fog_compare_ratio: float = 0.25
+    fog_memory_ratio: float = 0.75
+    fog_expand_ratio: float = 2.0
+    fog_gate_ratio: float = 0.125
     anchor_prior_weight: float = 1.0
     anchor_runtime_weight: float = 1.0
     anchor_threshold: float = 0.65
+    anchor_domain_mode: str = "auto"
     anchor_max_candidates: int = 6
     anchor_ttl_init: float = 4.0
     anchor_support_decay: float = 0.9
@@ -72,6 +91,34 @@ class ModelConfig:
     anchor_dependency_max_predecessors: int = 4
     anchor_dependency_counterfactual_top_edges: int = 0
     anchor_dependency_future_window: int = 16
+    anchor_context_min_viability: float = 0.30
+    anchor_use_future_proposal_head: bool = True
+    anchor_future_proposal_trigger: float = 0.35
+    anchor_future_proposal_hidden: int = 64
+    anchor_future_proposal_threshold: float = 0.58
+    anchor_future_proposal_temperature: float = 0.75
+    anchor_future_proposal_horizon_scale: float = 4.0
+    anchor_future_proposal_span_scale: float = 4.0
+    anchor_future_proposal_max_horizon: int = 32
+    anchor_future_proposal_max_windows: int = 48
+    anchor_future_proposal_topk: int = 4
+    anchor_future_proposal_residual_scale: float = 0.10
+    anchor_proposal_score_weight: float = 0.05
+    anchor_proposal_margin_weight: float = 0.05
+    anchor_proposal_alignment_weight: float = 0.02
+    anchor_proposal_counterfactual_weight: float = 0.05
+    anchor_proposal_margin_target: float = 0.05
+    anchor_proposal_target_temperature: float = 0.15
+    anchor_proposal_counterfactual_margin: float = 0.02
+    anchor_proposal_counterfactual_window: int = 4
+    anchor_use_proposal_rollout: bool = True
+    anchor_proposal_rollout_steps: int = 4
+    anchor_proposal_rollout_hidden: int = 64
+    anchor_proposal_rollout_weight: float = 0.05
+    anchor_proposal_rollout_margin: float = 0.02
+    anchor_proposal_rollout_residual_scale: float = 0.15
+    anchor_proposal_rollout_pressure_trigger: float = 0.45
+    anchor_proposal_rollout_score_trigger: float = 0.90
 
     # Training
     learning_rate: float = 3e-4
@@ -115,6 +162,14 @@ TOY_CONFIG = ModelConfig(
     plastic_hidden=16,
 )
 
+SCALEUP_CONFIG = ModelConfig(
+    vocab_size=512, d_model=512, n_heads=8,
+    n_layers=4, d_ff=1024, max_seq_len=128,
+    plastic_hidden=128,
+    anchor_threshold=0.2, anchor_ttl_init=4.0,
+    anchor_dead_end_threshold=0.5
+)
+
 PRESETS = {
     "baseline-0": BASELINE_0,
     "baseline-1-attnres": BASELINE_1_ATTNRES,
@@ -122,4 +177,5 @@ PRESETS = {
     "baseline-3-plastic": BASELINE_3_PLASTIC,
     "full": FULL_MODEL,
     "toy": TOY_CONFIG,
+    "scaleup": SCALEUP_CONFIG,
 }

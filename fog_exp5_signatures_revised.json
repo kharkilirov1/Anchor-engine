@@ -1,0 +1,260 @@
+{
+  "Copy": {
+    "Uniform": {
+      "layer_0": {
+        "attn_entropy_per_head": [
+          0.136,
+          0.149,
+          0.212,
+          0.106
+        ],
+        "attn_entropy_mean": 0.151,
+        "activation_metric": 0.535
+      },
+      "layer_1": {
+        "attn_entropy_per_head": [
+          0.234,
+          0.305,
+          0.465,
+          0.284
+        ],
+        "attn_entropy_mean": 0.322,
+        "activation_metric": 0.528
+      },
+      "layer_2": {
+        "attn_entropy_per_head": [
+          0.655,
+          0.512,
+          0.589,
+          0.686
+        ],
+        "attn_entropy_mean": 0.611,
+        "activation_metric": 0.52
+      },
+      "layer_3": {
+        "attn_entropy_per_head": [
+          0.594,
+          0.737,
+          0.594,
+          0.761
+        ],
+        "attn_entropy_mean": 0.671,
+        "activation_metric": 0.521
+      }
+    },
+    "FOG": {
+      "layer_0": {
+        "attn_entropy_per_head": [
+          0.483,
+          0.321,
+          0.414,
+          0.473
+        ],
+        "attn_entropy_mean": 0.423,
+        "activation_metric": 0.006
+      },
+      "layer_1": {
+        "attn_entropy_per_head": [
+          0.326,
+          0.336,
+          0.361,
+          0.39
+        ],
+        "attn_entropy_mean": 0.353,
+        "activation_metric": 0.013
+      },
+      "layer_2": {
+        "attn_entropy_per_head": [
+          0.629,
+          0.398,
+          0.622,
+          0.524
+        ],
+        "attn_entropy_mean": 0.543,
+        "activation_metric": 0.048
+      },
+      "layer_3": {
+        "attn_entropy_per_head": [
+          0.677,
+          0.813,
+          0.748,
+          0.859
+        ],
+        "attn_entropy_mean": 0.774,
+        "activation_metric": 0.115
+      }
+    }
+  },
+  "Reverse": {
+    "Uniform": {
+      "layer_0": {
+        "attn_entropy_per_head": [
+          0.171,
+          0.226,
+          0.356,
+          0.095
+        ],
+        "attn_entropy_mean": 0.212,
+        "activation_metric": 0.527
+      },
+      "layer_1": {
+        "attn_entropy_per_head": [
+          0.574,
+          0.216,
+          0.576,
+          0.463
+        ],
+        "attn_entropy_mean": 0.457,
+        "activation_metric": 0.519
+      },
+      "layer_2": {
+        "attn_entropy_per_head": [
+          0.713,
+          0.659,
+          0.804,
+          0.715
+        ],
+        "attn_entropy_mean": 0.723,
+        "activation_metric": 0.52
+      },
+      "layer_3": {
+        "attn_entropy_per_head": [
+          0.635,
+          0.611,
+          0.575,
+          0.693
+        ],
+        "attn_entropy_mean": 0.629,
+        "activation_metric": 0.519
+      }
+    },
+    "FOG": {
+      "layer_0": {
+        "attn_entropy_per_head": [
+          0.548,
+          0.456,
+          0.475,
+          0.588
+        ],
+        "attn_entropy_mean": 0.517,
+        "activation_metric": 0.006
+      },
+      "layer_1": {
+        "attn_entropy_per_head": [
+          0.243,
+          0.548,
+          0.336,
+          0.346
+        ],
+        "attn_entropy_mean": 0.368,
+        "activation_metric": 0.017
+      },
+      "layer_2": {
+        "attn_entropy_per_head": [
+          0.604,
+          0.682,
+          0.792,
+          0.477
+        ],
+        "attn_entropy_mean": 0.639,
+        "activation_metric": 0.048
+      },
+      "layer_3": {
+        "attn_entropy_per_head": [
+          0.579,
+          0.545,
+          0.613,
+          0.641
+        ],
+        "attn_entropy_mean": 0.594,
+        "activation_metric": 0.124
+      }
+    }
+  },
+  "Retrieval": {
+    "Uniform": {
+      "layer_0": {
+        "attn_entropy_per_head": [
+          0.904,
+          0.868,
+          0.879,
+          0.901
+        ],
+        "attn_entropy_mean": 0.888,
+        "activation_metric": 0.476
+      },
+      "layer_1": {
+        "attn_entropy_per_head": [
+          0.793,
+          0.871,
+          0.76,
+          0.82
+        ],
+        "attn_entropy_mean": 0.811,
+        "activation_metric": 0.479
+      },
+      "layer_2": {
+        "attn_entropy_per_head": [
+          0.878,
+          0.845,
+          0.723,
+          0.776
+        ],
+        "attn_entropy_mean": 0.806,
+        "activation_metric": 0.456
+      },
+      "layer_3": {
+        "attn_entropy_per_head": [
+          0.923,
+          0.928,
+          0.929,
+          0.845
+        ],
+        "attn_entropy_mean": 0.906,
+        "activation_metric": 0.456
+      }
+    },
+    "FOG": {
+      "layer_0": {
+        "attn_entropy_per_head": [
+          0.851,
+          0.862,
+          0.931,
+          0.884
+        ],
+        "attn_entropy_mean": 0.882,
+        "activation_metric": 0.009
+      },
+      "layer_1": {
+        "attn_entropy_per_head": [
+          0.655,
+          0.769,
+          0.855,
+          0.611
+        ],
+        "attn_entropy_mean": 0.723,
+        "activation_metric": 0.026
+      },
+      "layer_2": {
+        "attn_entropy_per_head": [
+          0.831,
+          0.874,
+          0.799,
+          0.715
+        ],
+        "attn_entropy_mean": 0.805,
+        "activation_metric": 0.03
+      },
+      "layer_3": {
+        "attn_entropy_per_head": [
+          0.931,
+          0.81,
+          0.908,
+          0.823
+        ],
+        "attn_entropy_mean": 0.868,
+        "activation_metric": 0.025
+      }
+    }
+  }
+}

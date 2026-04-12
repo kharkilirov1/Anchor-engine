@@ -46,8 +46,21 @@ def test_abpt_b_route_stats():
         assert "backward" in s
         assert "plastic" in s
         assert "mean_ed" in s
+        assert "theta1" in s
+        assert "theta2" in s
+        assert "theta3" in s
         total = s["forward"] + s["branch"] + s["backward"] + s["plastic"]
         assert abs(total - 1.0) < 0.01
+
+
+def test_abpt_b_uses_multiple_routes_after_warmup():
+    cfg = replace(TOY_CONFIG, eq_warmup_steps=0)
+    model = ABPTModelB(cfg)
+    x = torch.randint(0, cfg.vocab_size, (2, 32))
+    out = model(x)
+    stats = out["route_stats"][-1]
+    active_routes = sum(float(stats[name] > 0.0) for name in ("forward", "branch", "backward", "plastic"))
+    assert active_routes >= 2
 
 
 def test_abpt_b_no_modules():

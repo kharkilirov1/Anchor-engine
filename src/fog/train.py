@@ -21,7 +21,7 @@ from src.fog.data import (
     CopyTask, ReverseTask, SelectiveRetrieval,
     DistractorRetrieval, NoisyRetrieval, MultiQueryRetrieval,
     ChainedRetrieval,
-    DenseRetrieval, NoisyDenseRetrieval, SortedRetrieval, MultiHopChained,
+    ConditionalRetrieval, SetIntersection, ComposeArithmetic, MultiHopChained,
     prebatch_dataset, TensorBatchIterator,
 )
 
@@ -102,9 +102,9 @@ TASK_MAP = {
     "noisy": NoisyRetrieval,
     "multiquery": MultiQueryRetrieval,
     "chained": ChainedRetrieval,
-    "dense": DenseRetrieval,
-    "noisy_dense": NoisyDenseRetrieval,
-    "sorted": SortedRetrieval,
+    "conditional": ConditionalRetrieval,
+    "intersection": SetIntersection,
+    "compose_add": ComposeArithmetic,
     "multihop": MultiHopChained,
 }
 
@@ -132,13 +132,13 @@ def run_experiment(
     if task_name == "chained":
         extra_kwargs["n_pairs"] = 6
     elif task_name == "multihop":
-        extra_kwargs["n_pairs"] = 12
-    elif task_name == "dense":
-        extra_kwargs["n_pairs"] = 16
-    elif task_name == "noisy_dense":
         extra_kwargs["n_pairs"] = 10
-        extra_kwargs["noise_len"] = 4
-    elif task_name == "sorted":
+    elif task_name == "conditional":
+        extra_kwargs["n_pairs"] = 6
+    elif task_name == "intersection":
+        extra_kwargs["set_size"] = 8
+        extra_kwargs["overlap"] = 3
+    elif task_name == "compose_add":
         extra_kwargs["n_pairs"] = 6
     elif task_name in ("distractor", "noisy", "multiquery", "retrieval"):
         extra_kwargs["n_pairs"] = 4

@@ -291,67 +291,13 @@ class ChainedRetrieval(Dataset):
 # ── Stress tasks for 400-800K models ────────────────────────────
 
 
-class DenseRetrieval(Dataset):
-    """Many KV pairs (16-20), large vocab, one query. Stresses memory capacity."""
+class ConditionalRetrieval(Dataset):
+    """Conditional branching: [k1,v1,k2,v2,..., SEP, query_key, threshold] -> value if key>threshold else 0.
 
-    def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
-                 n_pairs: int = 16, seed: int = 42):
-        super().__init__()
-        sep = vocab_size - 1
-        rng = random.Random(seed)
-        cv = vocab_size - 2
-        self.items = []
-        for _ in range(n_samples):
-            keys = rng.sample(range(cv), min(n_pairs, cv))
-            values = [rng.randint(0, cv - 1) for _ in keys]
-            qi = rng.randint(0, len(keys) - 1)
-            ids = []
-            for k, v in zip(keys, values):
-                ids.extend([k, v])
-            sp = len(ids)
-            ids += [sep, keys[qi], values[qi]]
-            self.items.append(_build_item(ids, sp, seq_len))
-
-    def __len__(self) -> int:
-        return len(self.items)
-
-    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        return self.items[idx]
-
-
-class NoisyDenseRetrieval(Dataset):
-    """10 KV pairs with 4-6 noise tokens between each. Forces filtering + memory."""
-
-    def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
-                 n_pairs: int = 10, noise_len: int = 4, seed: int = 42):
-        super().__init__()
-        sep = vocab_size - 1
-        rng = random.Random(seed)
-        cv = vocab_size - 2
-        self.items = []
-        for _ in range(n_samples):
-            keys = rng.sample(range(cv), min(n_pairs, cv))
-            values = [rng.randint(0, cv - 1) for _ in keys]
-            qi = rng.randint(0, len(keys) - 1)
-            ids = []
-            for i, (k, v) in enumerate(zip(keys, values)):
-                ids.extend([k, v])
-                if i < len(keys) - 1:
-                    nl = rng.randint(noise_len, noise_len + 2)
-                    ids.extend([rng.randint(0, cv - 1) for _ in range(nl)])
-            sp = len(ids)
-            ids += [sep, keys[qi], values[qi]]
-            self.items.append(_build_item(ids, sp, seq_len))
-
-    def __len__(self) -> int:
-        return len(self.items)
-
-    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        return self.items[idx]
-
-
-class SortedRetrieval(Dataset):
-    """Retrieve values in sorted key order. Tests compare + memory + ordering."""
+    Forces the model to compare query_key against keys AND compare the matched key
+    against a threshold — two distinct comparison operations chained with a branch.
+    Tests: Phi_compare (double), Phi_memory, conditional logic.
+    """
 
     def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
                  n_pairs: int = 6, seed: int = 42):
@@ -362,15 +308,89 @@ class SortedRetrieval(Dataset):
         self.items = []
         for _ in range(n_samples):
             keys = rng.sample(range(cv), min(n_pairs, cv))
-            values = [rng.randint(0, cv - 1) for _ in keys]
-            sorted_pairs = sorted(zip(keys, values))
+            values = [rng.randint(1, cv - 1) for _ in keys]
+            qi = rng.randint(0, len(keys) - 1)
+            threshold = rng.randint(0, cv - 1)
+            answer = values[qi] if keys[qi] > threshold else 0
             ids = []
             for k, v in zip(keys, values):
                 ids.extend([k, v])
             sp = len(ids)
-            ids.append(sep)
-            for _, v in sorted_pairs:
-                ids.append(v)
+            ids += [sep, keys[qi], threshold, answer]
+            self.items.append(_build_item(ids, sp, seq_len))
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        return self.items[idx]
+
+
+class SetIntersection(Dataset):
+    """Two sets A and B, output sorted intersection.
+
+    [a1,a2,...,aN, SEP1, b1,b2,...,bM, SEP2, sorted intersection tokens...]
+
+    Forces the model to: hold set A in memory, scan B comparing each element,
+    collect matches, output them sorted. Multi-output, requires compare+memory+ordering.
+    """
+
+    def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
+                 set_size: int = 8, overlap: int = 3, seed: int = 42):
+        super().__init__()
+        sep1 = vocab_size - 1
+        sep2 = vocab_size - 2
+        rng = random.Random(seed)
+        cv = vocab_size - 3
+        self.items = []
+        for _ in range(n_samples):
+            pool = rng.sample(range(cv), min(set_size * 2, cv))
+            shared = pool[:overlap]
+            a_only = pool[overlap:set_size]
+            b_only = pool[set_size:set_size + (set_size - overlap)]
+            set_a = shared + a_only
+            set_b = shared + b_only
+            rng.shuffle(set_a)
+            rng.shuffle(set_b)
+            intersection = sorted(shared)
+            ids = set_a + [sep1] + set_b + [sep2] + intersection
+            sp = len(set_a) + 1 + len(set_b)  # mask starts after SEP2
+            self.items.append(_build_item(ids, sp, seq_len))
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        return self.items[idx]
+
+
+class ComposeArithmetic(Dataset):
+    """Retrieve two values by keys, output (v1 + v2) mod M.
+
+    [k1,v1,...,kN,vN, SEP, query_key1, query_key2, answer]
+
+    Forces: two parallel retrievals + arithmetic composition.
+    Tests: Phi_memory (dual retrieval), Phi_compose (modular addition).
+    """
+
+    def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
+                 n_pairs: int = 6, seed: int = 42):
+        super().__init__()
+        sep = vocab_size - 1
+        rng = random.Random(seed)
+        cv = vocab_size - 2
+        modulus = cv  # values stay in valid token range
+        self.items = []
+        for _ in range(n_samples):
+            keys = rng.sample(range(cv), min(n_pairs, cv))
+            values = [rng.randint(0, cv - 1) for _ in keys]
+            qi1, qi2 = rng.sample(range(len(keys)), 2)
+            answer = (values[qi1] + values[qi2]) % modulus
+            ids = []
+            for k, v in zip(keys, values):
+                ids.extend([k, v])
+            sp = len(ids)
+            ids += [sep, keys[qi1], keys[qi2], answer]
             self.items.append(_build_item(ids, sp, seq_len))
 
     def __len__(self) -> int:
@@ -381,39 +401,38 @@ class SortedRetrieval(Dataset):
 
 
 class MultiHopChained(Dataset):
-    """3-hop chained retrieval. query→v1→v2→v3 (answer)."""
+    """3-hop chained retrieval with guaranteed chains (no retry loop).
+
+    Constructs chains deterministically: picks 4 keys, wires k0→k1→k2→k3,
+    fills remaining pairs randomly. Output = value of final hop.
+
+    Forces: 3 sequential compose operations, each requiring compare+memory.
+    """
 
     def __init__(self, vocab_size: int, seq_len: int, n_samples: int,
-                 n_pairs: int = 12, seed: int = 42):
+                 n_pairs: int = 10, seed: int = 42):
         super().__init__()
         sep = vocab_size - 1
         rng = random.Random(seed)
         cv = vocab_size - 2
         self.items = []
-        attempts = 0
-        while len(self.items) < n_samples and attempts < n_samples * 50:
-            attempts += 1
-            if cv < n_pairs:
-                break
-            keys = rng.sample(range(cv), n_pairs)
-            values = [rng.randint(0, cv - 1) for _ in keys]
-            kv = dict(zip(keys, values))
-            for start_idx in range(n_pairs):
-                k0 = keys[start_idx]
-                v0 = values[start_idx]
-                if v0 not in kv or v0 == k0:
-                    continue
-                v1 = kv[v0]
-                if v1 not in kv or v1 == v0:
-                    continue
-                v2 = kv[v1]
-                ids = []
-                for k, v in zip(keys, values):
-                    ids.extend([k, v])
-                sp = len(ids)
-                ids += [sep, k0, v2]
-                self.items.append(_build_item(ids, sp, seq_len))
-                break
+        for _ in range(n_samples):
+            all_keys = rng.sample(range(cv), min(n_pairs, cv))
+            # Wire a guaranteed 3-hop chain: k0→k1, k1→k2, k2→final_answer
+            values = [rng.randint(0, cv - 1) for _ in all_keys]
+            values[0] = all_keys[1]  # hop1: k0 → k1
+            values[1] = all_keys[2]  # hop2: k1 → k2
+            values[2] = rng.randint(0, cv - 1)  # hop3: k2 → answer
+            answer = values[2]
+            # Shuffle pair order so chain isn't positionally obvious
+            pairs = list(zip(all_keys, values))
+            rng.shuffle(pairs)
+            ids = []
+            for k, v in pairs:
+                ids.extend([k, v])
+            sp = len(ids)
+            ids += [sep, all_keys[0], answer]
+            self.items.append(_build_item(ids, sp, seq_len))
 
     def __len__(self) -> int:
         return len(self.items)

@@ -115,7 +115,7 @@ def remote_worker_run(
             f"hardware.current={current_hardware}, hardware.requested={requested_hardware}"
         )
         allow_cpu_space = os.environ.get("ALLOW_CPU_SPACE", "").strip() == "1"
-        if not allow_cpu_space and "gpu" not in current_hardware.lower():
+        if not allow_cpu_space and not any(x in current_hardware.lower() for x in ("gpu", "a10g", "zero")):
             return {
                 "status": "error",
                 "error": (
@@ -137,7 +137,7 @@ def remote_worker_run(
         "script": script,
         "args": args,
         "model": model,
-        "timeout": min(timeout, 300),
+        "timeout": min(timeout, 3600),
     })
 
     print(f"[RemoteWorker] Connecting to {worker_url} ...")
@@ -214,7 +214,7 @@ def _sync_script_to_space(script: str) -> None:
         shutil.copy2(str(local_requirements), str(space_requirements))
         changed = True
     if local_src.exists():
-        shutil.copytree(local_src, space_src, dirs_exist_ok=True)
+        shutil.copytree(local_src, space_src, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
         changed = True
     if not changed:
         return
